@@ -1,0 +1,26 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Webcraft</title>
+    <link rel="stylesheet" href="styles/main.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/simplex-noise/2.4.0/simplex-noise.min.js"></script>
+</head>
+<body>
+    <div id="instructions">
+        WASD: Move<br>
+        Space: Jump<br>
+        Mouse: Look around<br>
+        Click: Add/Remove voxel
+    </div>
+    <div id="cursor"></div>
+    <div id="block-selector"></div>
+    <script type="module" src="scripts/utils.js"></script>
+    <script type="module" src="scripts/world.js"></script>
+    <script type="module" src="scripts/player.js"></script>
+    <script type="module" src="scripts/renderer.js"></script>
+    <script type="module" src="scripts/main.js"></script>
+</body>
+</html>

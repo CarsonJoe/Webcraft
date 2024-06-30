@@ -80,7 +80,7 @@
 
         function createSkybox() {
             const loader = new THREE.TextureLoader();
-            loader.load('sky.png', (texture) => {
+            loader.load('/sky.png', (texture) => {
                 const rt = new THREE.WebGLCubeRenderTarget(texture.image.height);
                 rt.fromEquirectangularTexture(renderer, texture);
                 scene.background = rt.texture;
