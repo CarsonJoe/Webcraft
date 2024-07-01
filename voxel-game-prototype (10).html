@@ -102,11 +102,11 @@
         };
 
         // Chunk settings
-        const CHUNK_SIZE = 16;
-        const CHUNK_HEIGHT = 36;
+        const CHUNK_SIZE = 32;
+        const CHUNK_HEIGHT = 72;
         const WATER_LEVEL = 12;
         const BEACH_LEVEL = WATER_LEVEL + 1;
-        const RENDER_DISTANCE = 5;
+        const RENDER_DISTANCE = 2;
         const worldSize = CHUNK_SIZE * RENDER_DISTANCE;
 
         // World data structure
@@ -403,15 +403,15 @@
         let canJump = false;
         
         // Player hitbox
-        const playerWidth = 0.6;
-        const playerHeight = 1.8;
-        const eyeHeight = 1.6;
+        const playerWidth = 1.2;
+        const playerHeight = 3.6;
+        const eyeHeight = 3.2;
 
         const pitchObject = new THREE.Object3D();
         pitchObject.position.y = eyeHeight;
         pitchObject.add(camera);
         const yawObject = new THREE.Object3D();
-        yawObject.position.y = 30; // Initial spawn height
+        yawObject.position.y = 50; // Initial spawn height
         yawObject.add(pitchObject);
         scene.add(yawObject);
 
@@ -625,3 +625,7 @@
     </script>
 </body>
 </html>
+
+
+
+

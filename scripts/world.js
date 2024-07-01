@@ -5,6 +5,8 @@ const simplex = new SimplexNoise();
 const blockColors = new Map();
 
 const chunks = {};
+const chunkStates = {};
+const chunkLoadQueue = [];
 
 const materials = {
     0: { color: 0x000000 }, // Air (black, but it won't be rendered)
@@ -19,6 +21,13 @@ const materials = {
     9: { color: 0xFFFFFF }  // Limestone
 };
 
+// Chunk states
+const CHUNK_UNLOADED = 0;
+const CHUNK_LOADING = 1;
+const CHUNK_LOADED = 2;
+const CHUNK_MESH_UPDATING = 3;
+const CHUNK_READY = 4;
+
 // World generation and manipulation functions
 function generateChunk(chunkX, chunkZ) {
     const chunk = new Int8Array(CHUNK_SIZE * CHUNK_SIZE * CHUNK_HEIGHT);
@@ -28,27 +37,27 @@ function generateChunk(chunkX, chunkZ) {
             const worldX = chunkX * CHUNK_SIZE + x;
             const worldZ = chunkZ * CHUNK_SIZE + z;
             
-            // Use larger scale noise for base terrain to ensure smoother transitions between chunks
-            const baseHeight = (simplex.noise2D(worldX * 0.005, worldZ * 0.005) + 1) * 0.6;
-            const detailHeight = (simplex.noise2D(worldX * 0.02, worldZ * 0.02) + 1) * 0.5;
-            const height = Math.floor((baseHeight * 0.8 + detailHeight * 0.2) * (CHUNK_HEIGHT - WATER_LEVEL)) + WATER_LEVEL - 6;
+            // Adjust noise scale to maintain similar terrain features
+            const baseHeight = (simplex.noise2D(worldX * 0.0025, worldZ * 0.0025) + 1) * 0.8;
+            const detailHeight = (simplex.noise2D(worldX * 0.01, worldZ * 0.01) + 1) * 0.5;
+            const height = Math.floor((baseHeight * 0.8 + detailHeight * 0.2) * (CHUNK_HEIGHT - WATER_LEVEL)) + WATER_LEVEL - 20;
 
-            // Generate noise for ore distribution
-            const slateNoise = simplex.noise3D(worldX * 0.05, 0, worldZ * 0.05);
-            const limestoneNoise = simplex.noise3D(worldX * 0.05, 100, worldZ * 0.05);
+            // Generate noise for ore distribution (adjusted scale)
+            const slateNoise = simplex.noise3D(worldX * 0.025, 0, worldZ * 0.025);
+            const limestoneNoise = simplex.noise3D(worldX * 0.025, 100, worldZ * 0.025);
 
             for (let y = 0; y < CHUNK_HEIGHT; y++) {
                 let blockType;
 
                 if (y < height) {
-                    if (y < height - 4) {
+                    if (y < height - 8) { // Doubled from 4
                         blockType = 3; // Stone
                         if (y < CHUNK_HEIGHT / 2) {
                             if (slateNoise > 0.3 && Math.random() < 0.7) blockType = 8; // Slate (deeper stone)
                         } else {
                             if (limestoneNoise > 0.3 && Math.random() < 0.7) blockType = 9; // Limestone
                         }
-                    } else if (y < height - 1) {
+                    } else if (y < height - 2) { // Doubled from 1
                         blockType = 2; // Dirt
                     } else {
                         if (y <= BEACH_LEVEL) {
@@ -66,17 +75,17 @@ function generateChunk(chunkX, chunkZ) {
                 chunk[x + z * CHUNK_SIZE + y * CHUNK_SIZE * CHUNK_SIZE] = blockType;
             }
 
-            // Tree generation (unchanged)
+            // Tree generation (adjusted for new scale)
             if (height > BEACH_LEVEL && Math.random() < 0.02) {
-                const treeHeight = Math.floor(Math.random() * 3) + 4;
+                const treeHeight = Math.floor(Math.random() * 10) + 8; // Doubled
                 for (let y = height; y < height + treeHeight && y < CHUNK_HEIGHT; y++) {
                     chunk[x + z * CHUNK_SIZE + y * CHUNK_SIZE * CHUNK_SIZE] = 6; // Wood
                 }
                 // Add leaves
-                for (let leafY = height + treeHeight - 3; leafY <= height + treeHeight && leafY < CHUNK_HEIGHT; leafY++) {
-                    for (let leafX = -2; leafX <= 2; leafX++) {
-                        for (let leafZ = -2; leafZ <= 2; leafZ++) {
-                            if (Math.abs(leafX) + Math.abs(leafZ) + Math.abs(leafY - (height + treeHeight)) < 4) {
+                for (let leafY = height + treeHeight - 6; leafY <= height + treeHeight && leafY < CHUNK_HEIGHT; leafY++) {
+                    for (let leafX = -4; leafX <= 4; leafX++) {
+                        for (let leafZ = -4; leafZ <= 4; leafZ++) {
+                            if (Math.abs(leafX) + Math.abs(leafZ) + Math.abs(leafY - (height + treeHeight)) < 8) {
                                 const wx = x + leafX;
                                 const wz = z + leafZ;
                                 if (wx >= 0 && wx < CHUNK_SIZE && wz >= 0 && wz < CHUNK_SIZE) {
@@ -155,19 +164,52 @@ function updateBlock(x, y, z, newBlockType) {
     if (localZ === CHUNK_SIZE - 1) updateChunkGeometry(chunkX, chunkZ + 1);
 }
 
+function addToLoadQueue(x, z, priority) {
+    chunkLoadQueue.push({ x, z, priority });
+    chunkLoadQueue.sort((a, b) => b.priority - a.priority);
+}
+
+function processChunkQueue() {
+    const MAX_CHUNKS_PER_FRAME = 100;
+    let processedChunks = 0;
+
+    while (chunkLoadQueue.length > 0 && processedChunks < MAX_CHUNKS_PER_FRAME) {
+        const { x, z } = chunkLoadQueue.shift();
+        const chunkKey = `${x},${z}`;
+
+        if (!chunks[chunkKey]) {
+            chunks[chunkKey] = generateChunk(x, z);
+            chunkStates[chunkKey] = CHUNK_LOADED;
+            updateChunkGeometry(x, z);
+            processedChunks++;
+        }
+    }
+
+    if (chunkLoadQueue.length > 0) {
+        requestAnimationFrame(processChunkQueue);
+    }
+}
+
 function updateChunks(scene, playerPosition) {
     if (!playerPosition) return;
 
     const playerChunkX = Math.floor(playerPosition.x / CHUNK_SIZE);
     const playerChunkZ = Math.floor(playerPosition.z / CHUNK_SIZE);
 
+    // Set to keep track of chunks that should be loaded
+    const chunksToKeep = new Set();
+
+    // Load and update chunks within render distance
     for (let x = playerChunkX - RENDER_DISTANCE; x <= playerChunkX + RENDER_DISTANCE; x++) {
         for (let z = playerChunkZ - RENDER_DISTANCE; z <= playerChunkZ + RENDER_DISTANCE; z++) {
             const chunkKey = `${x},${z}`;
+            chunksToKeep.add(chunkKey);
+
+            const distance = Math.sqrt((x - playerChunkX) ** 2 + (z - playerChunkZ) ** 2);
+
             if (!chunks[chunkKey]) {
-                chunks[chunkKey] = generateChunk(x, z);
-            }
-            if (!chunkMeshes[chunkKey]) {
+                addToLoadQueue(x, z, 1 / (distance + 1));
+            } else if (!chunkMeshes[chunkKey]) {
                 updateChunkGeometry(x, z, scene);
             }
         }
@@ -175,15 +217,19 @@ function updateChunks(scene, playerPosition) {
 
     // Remove chunks that are out of render distance
     for (const chunkKey in chunkMeshes) {
-        const [x, z] = chunkKey.split(',').map(Number);
-        if (Math.abs(x - playerChunkX) > RENDER_DISTANCE || Math.abs(z - playerChunkZ) > RENDER_DISTANCE) {
-            scene.remove(chunkMeshes[chunkKey]);
+        if (!chunksToKeep.has(chunkKey)) {
+            const [x, z] = chunkKey.split(',').map(Number);
+            scene.remove(chunkMeshes[chunkKey].solid);
+            scene.remove(chunkMeshes[chunkKey].water);
+            chunkMeshes[chunkKey].solid.geometry.dispose();
+            chunkMeshes[chunkKey].water.geometry.dispose();
             delete chunkMeshes[chunkKey];
+            delete chunks[chunkKey];
+            delete chunkStates[chunkKey];
         }
     }
+
+    processChunkQueue();
 }
 
 export { updateChunks, setBlock, getBlock, chunks, materials, blockColors, updateBlock };
-
-
-

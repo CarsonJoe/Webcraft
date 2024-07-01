@@ -42,7 +42,7 @@ function animate() {
     requestAnimationFrame(animate);
     Player.update(getBlock);
     updateChunks(scene, Player.getPosition());
-    render(scene, camera);
+    render(scene, camera);  // Use the new render function with frustum culling
 }
 
 animate();
