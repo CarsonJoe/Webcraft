@@ -1,5 +1,5 @@
-import { CHUNK_HEIGHT, CHUNK_SIZE } from './constants.js';
-import { getBlock, updateBlock, chunks, generateChunk } from "./world.js";
+import { CHUNK_HEIGHT } from './constants.js';
+import { getBlock, updateBlock } from "./world.js";
 import { updateBlockSelector } from "./utils.js";
 import { chunkMeshes } from "./renderer.js";
  
@@ -7,7 +7,7 @@ import { chunkMeshes } from "./renderer.js";
 const Player = (function() {
     // Player constants
     const NORMAL_SPEED = 8; // Units per second
-    const SPRINT_SPEED = NORMAL_SPEED * 1.4;
+    const SPRINT_SPEED = NORMAL_SPEED * 1.2;
     const SWIM_SPEED = 1.5; // Units per second
     const JUMP_FORCE = 8; // Units per second
     const GRAVITY = 20; // Units per second squared
@@ -30,6 +30,7 @@ const Player = (function() {
 
     // Input state
     const keys = {};
+    const mouse = new THREE.Vector2();
 
     // Time tracking
     let lastTime = performance.now();
@@ -41,7 +42,7 @@ const Player = (function() {
         pitchObject.add(camera);
 
         yawObject = new THREE.Object3D();
-        yawObject.position.y = 200; // Initial spawn height
+        yawObject.position.y = 100; // Initial spawn height
         yawObject.add(pitchObject);
         scene.add(yawObject);
 
@@ -141,6 +142,7 @@ const Player = (function() {
         return false; // Can't place if floating in air
     }
 
+
     function onKeyDown(event) {
         keys[event.code] = true;
         if (event.code === 'ShiftLeft') {
@@ -229,9 +231,9 @@ const Player = (function() {
             yawObject.position.z = newZ;
         }
 
-        // Ensure player doesn't fall through the world/*
+        // Ensure player doesn't fall through the world
         if (yawObject.position.y < -10) {
-            yawObject.position.set(0, 200, 0);
+            yawObject.position.set(0, 30, 0);
             velocity.set(0, 0, 0);
         }
     }
@@ -247,19 +249,32 @@ const Player = (function() {
             [x - PLAYER_WIDTH / 2, y + PLAYER_HEIGHT, z + PLAYER_WIDTH / 2],
             [x + PLAYER_WIDTH / 2, y + PLAYER_HEIGHT, z + PLAYER_WIDTH / 2]
         ];
-    
+
         for (const [px, py, pz] of positions) {
-            const blockType = getBlockGlobal(px, py, pz);
+            const blockType = getBlock(Math.floor(px), Math.floor(py), Math.floor(pz));
             if (blockType !== 0 && blockType !== 5) { // Not air and not water
                 return true;
             }
         }
         return false;
     }
-    
+
     function checkWaterCollision(x, y, z) {
         const blockType = getBlock(Math.floor(x), Math.floor(y), Math.floor(z));
         return blockType === 5; // 5 is the water block type
+    }
+
+    function checkClimb(x, y, z) {
+        // Check if there's a block in front of the player
+        const frontBlockType = getBlock(Math.floor(x), Math.floor(y), Math.floor(z));
+        if (frontBlockType !== 0 && frontBlockType !== 5) {
+            // Check if the block above is air or water
+            const aboveBlockType = getBlock(Math.floor(x), Math.floor(y + CLIMB_HEIGHT), Math.floor(z));
+            if (aboveBlockType === 0 || aboveBlockType === 5) {
+                return true;
+            }
+        }
+        return false;
     }
 
     function getPosition() {
@@ -268,26 +283,6 @@ const Player = (function() {
 
     function getObject() {
         return yawObject;
-    }
-
-    function getBlockGlobal(x, y, z) {
-        const chunkX = Math.floor(x / CHUNK_SIZE);
-        const chunkZ = Math.floor(z / CHUNK_SIZE);
-        const chunkKey = `${chunkX},${chunkZ}`;
-    
-        // Ensure the chunk is loaded
-        if (!chunks[chunkKey]) {
-            chunks[chunkKey] = generateChunk(chunkX, chunkZ);
-        }
-    
-        const localX = Math.floor(((x % CHUNK_SIZE) + CHUNK_SIZE) % CHUNK_SIZE);
-        const localZ = Math.floor(((z % CHUNK_SIZE) + CHUNK_SIZE) % CHUNK_SIZE);
-        const localY = Math.floor(y);
-    
-        if (localY < 0) return 1; // Treat below-world as solid
-        if (localY >= CHUNK_HEIGHT) return 0; // Treat above-world as air
-    
-        return chunks[chunkKey][localX + localZ * CHUNK_SIZE + localY * CHUNK_SIZE * CHUNK_SIZE] || 0;
     }
 
     return {

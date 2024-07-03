@@ -16,7 +16,7 @@ export function initRenderer(scn, cam) {
     renderer.setSize(window.innerWidth, window.innerHeight);
     document.body.appendChild(renderer.domElement);
     
-    scene.fog = new THREE.Fog(0x619dde, 20, 300);  // Sky blue color, start fading at 20 units, fully faded at 500 units
+    scene.fog = new THREE.Fog(0x619dde, 20, 120);  // Sky blue color, start fading at 20 units, fully faded at 500 units
 
     createFPSCounter();
 
@@ -199,18 +199,6 @@ export function updateChunkGeometry(chunkX, chunkZ) {
     }
 }
 
-export function removeChunkGeometry(chunkX, chunkZ) {
-    const chunkKey = `${chunkX},${chunkZ}`;
-    if (chunkMeshes[chunkKey]) {
-        scene.remove(chunkMeshes[chunkKey].solid);
-        scene.remove(chunkMeshes[chunkKey].water);
-        chunkMeshes[chunkKey].solid.geometry.dispose();
-        chunkMeshes[chunkKey].water.geometry.dispose();
-        chunkMeshes[chunkKey].solid.material.dispose();
-        chunkMeshes[chunkKey].water.material.dispose();
-        delete chunkMeshes[chunkKey];
-    }
-}
 
 export function createSkybox(scene, renderer) {
     const loader = new THREE.TextureLoader();

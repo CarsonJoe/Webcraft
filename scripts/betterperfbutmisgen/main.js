@@ -13,6 +13,14 @@ const renderer = initRenderer(scene, camera);
 // Create and apply the skybox
 createSkybox(scene, renderer);
 
+// Generate initial chunks
+const RENDER_DISTANCE = 5;
+for (let x = -RENDER_DISTANCE; x < RENDER_DISTANCE; x++) {
+    for (let z = -RENDER_DISTANCE; z < RENDER_DISTANCE; z++) {
+        updateChunkGeometry(x, z, scene);
+    }
+}
+
 // Add ambient light
 const ambientLight = new THREE.AmbientLight(0x404040);
 scene.add(ambientLight);
@@ -32,8 +40,8 @@ document.addEventListener('contextmenu', (event) => event.preventDefault());
 // Animation loop
 function animate() {
     requestAnimationFrame(animate);
-    updateChunks(scene, Player.getPosition());
     Player.update(getBlock);
+    updateChunks(scene, Player.getPosition());
     render(scene, camera);  // Use the new render function with frustum culling
 }
 
