@@ -9,7 +9,7 @@ let frameCount = 0;
 let lastTime = performance.now();
 
 export function initRenderer(scn, cam) {
-    scene = scn; // Ensure scene reference is updated
+    scene = scn;
     camera = cam;
     
     renderer = new THREE.WebGLRenderer({
@@ -17,10 +17,8 @@ export function initRenderer(scn, cam) {
         powerPreference: "high-performance"
     });
     
-    // Enable shadow maps
     renderer.shadowMap.enabled = true;
     renderer.shadowMap.type = THREE.PCFSoftShadowMap;
-    renderer = new THREE.WebGLRenderer({ antialias: false });
     renderer.setSize(window.innerWidth, window.innerHeight);
     document.body.appendChild(renderer.domElement);
     

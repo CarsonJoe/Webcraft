@@ -177,17 +177,11 @@ function generateGeometry(chunkX, chunkZ, chunkData, adjacentChunks) {
             for (let z = 0; z < CHUNK_SIZE; z++) {
                 const blockType = chunkData[x + z * CHUNK_SIZE + y * CHUNK_SIZE * CHUNK_SIZE];
                 if (blockType === 0) continue;
-                const isWater = blockType === 5;
 
+                // Get neighbor information first
                 const worldX = chunkX * CHUNK_SIZE + x;
                 const worldZ = chunkZ * CHUNK_SIZE + z;
-                const baseColor = hexToRGB(materials[blockType].color);
-                const colorMultipliers = getBlockVariation(worldX, y, worldZ, blockType);
-                const finalColor = baseColor.map((c, i) => 
-                    Math.min(1, Math.max(0, c * colorMultipliers[i]))
-                );
-
-                // Check neighbors using adjacent chunks
+                
                 const neighbors = {
                     px: getBlockInWorld(chunkX, chunkZ, x + 1, y, z, chunkData, adjacentChunks),
                     nx: getBlockInWorld(chunkX, chunkZ, x - 1, y, z, chunkData, adjacentChunks),
@@ -197,7 +191,28 @@ function generateGeometry(chunkX, chunkZ, chunkData, adjacentChunks) {
                     nz: getBlockInWorld(chunkX, chunkZ, x, y, z - 1, chunkData, adjacentChunks)
                 };
 
-                // Generate faces only if neighbor is air (for water) or transparent (for solids)
+                // Skip processing completely enclosed solid blocks
+                if (x > 0 && x < CHUNK_SIZE - 1 && 
+                    z > 0 && z < CHUNK_SIZE - 1 &&
+                    y > 0 && y < CHUNK_HEIGHT - 1) {
+                    if (!isTransparent(neighbors.px) && 
+                        !isTransparent(neighbors.nx) &&
+                        !isTransparent(neighbors.py) && 
+                        !isTransparent(neighbors.ny) &&
+                        !isTransparent(neighbors.pz) && 
+                        !isTransparent(neighbors.nz)) {
+                        continue;
+                    }
+                }
+
+                const isWater = blockType === 5;
+                const baseColor = hexToRGB(materials[blockType].color);
+                const colorMultipliers = getBlockVariation(worldX, y, worldZ, blockType);
+                const finalColor = baseColor.map((c, i) => 
+                    Math.min(1, Math.max(0, c * colorMultipliers[i]))
+                );
+
+                // Generate faces only if neighbor is transparent
                 if ((isWater && neighbors.px === 0) || (!isWater && isTransparent(neighbors.px)))
                     addFace(isWater, [1, 0, 0], x + 1, y, z, finalColor);
                 if ((isWater && neighbors.nx === 0) || (!isWater && isTransparent(neighbors.nx)))

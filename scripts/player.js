@@ -14,6 +14,21 @@ const Player = (function () {
     const WATER_GRAVITY = 4; // Units per second squared
     const PLAYER_WIDTH = 1.2;
     const PLAYER_HEIGHT = 3.6;
+    const HALF_WIDTH = PLAYER_WIDTH / 2;
+    const HALF_DEPTH = HALF_WIDTH; // Assuming square base
+    const COLLISION_OFFSETS = [
+        // Lower layer (y = 0)
+        [-HALF_WIDTH, 0, -HALF_DEPTH],
+        [HALF_WIDTH, 0, -HALF_DEPTH],
+        [-HALF_WIDTH, 0, HALF_DEPTH],
+        [HALF_WIDTH, 0, HALF_DEPTH],
+        
+        // Upper layer (y = PLAYER_HEIGHT)
+        [-HALF_WIDTH, PLAYER_HEIGHT, -HALF_DEPTH],
+        [HALF_WIDTH, PLAYER_HEIGHT, -HALF_DEPTH],
+        [-HALF_WIDTH, PLAYER_HEIGHT, HALF_DEPTH],
+        [HALF_WIDTH, PLAYER_HEIGHT, HALF_DEPTH]
+    ];
     const EYE_HEIGHT = 3.2;
     const STEP_HEIGHT = 1.0; // Maximum height of a step the player can automatically climb
 
@@ -298,24 +313,14 @@ const Player = (function () {
     }
 
     function checkCollision(x, y, z) {
-        const positions = [
-            [x - PLAYER_WIDTH / 2, y, z - PLAYER_WIDTH / 2],
-            [x + PLAYER_WIDTH / 2, y, z - PLAYER_WIDTH / 2],
-            [x - PLAYER_WIDTH / 2, y, z + PLAYER_WIDTH / 2],
-            [x + PLAYER_WIDTH / 2, y, z + PLAYER_WIDTH / 2],
-            [x - PLAYER_WIDTH / 2, y + PLAYER_HEIGHT, z - PLAYER_WIDTH / 2],
-            [x + PLAYER_WIDTH / 2, y + PLAYER_HEIGHT, z - PLAYER_WIDTH / 2],
-            [x - PLAYER_WIDTH / 2, y + PLAYER_HEIGHT, z + PLAYER_WIDTH / 2],
-            [x + PLAYER_WIDTH / 2, y + PLAYER_HEIGHT, z + PLAYER_WIDTH / 2]
-        ];
-
-        for (const [px, py, pz] of positions) {
-            const blockType = getBlockGlobal(px, py, pz);
-            if (blockType !== 0 && blockType !== 5) { // Not air and not water
-                return true;
-            }
-        }
-        return false;
+        return COLLISION_OFFSETS.some(([dx, dy, dz]) => {
+            const blockType = getBlockGlobal(
+                x + dx, 
+                y + dy, 
+                z + dz
+            );
+            return blockType !== 0 && blockType !== 5; // Not air or water
+        });
     }
 
     function checkWaterCollision(x, y, z) {

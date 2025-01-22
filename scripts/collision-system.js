@@ -33,22 +33,48 @@ export function checkCollision(entity, deltaTime) {
             const blockPos = worldPos.clone().floor();
 
             for (let dx = -1; dx <= 1; dx++) {
-                for (let dy = -1; dy <= 1; dy++) {
-                    for (let dz = -1; dz <= 1; dz++) {
-                        const checkPos = blockPos.clone().add(new THREE.Vector3(dx, dy, dz));
+                for (let dz = -1; dz <= 1; dz++) {
+                    // Optimized neighbor check order based on movement direction
+                    let neighborOrder;
+                    if (axis === 'y') {
+                        neighborOrder = velocity[axis] > 0 ? [1, 0, -1] : [-1, 0, 1];
+                    } else if (axis === 'x') {
+                        neighborOrder = velocity[axis] > 0 ? [1, 0, -1] : [-1, 0, 1];
+                    } else {
+                        neighborOrder = velocity[axis] > 0 ? [1, 0, -1] : [-1, 0, 1];
+                    }
+
+                    neighborOrder.forEach(delta => {
+                        let checkPos;
+                        switch (axis) {
+                            case 'x':
+                                checkPos = blockPos.clone().add(new THREE.Vector3(delta, dx, dz));
+                                break;
+                            case 'y':
+                                checkPos = blockPos.clone().add(new THREE.Vector3(dx, delta, dz));
+                                break;
+                            case 'z':
+                                checkPos = blockPos.clone().add(new THREE.Vector3(dx, dz, delta));
+                                break;
+                        }
+
                         const block = getBlock(checkPos.x, checkPos.y, checkPos.z);
 
-                        if (block !== 0 && block !== 5) { // Not air and not water
+                        if (block !== 0 && block !== 5) {
                             const blockBox = new THREE.Box3(checkPos, checkPos.clone().add(new THREE.Vector3(1, 1, 1)));
                             const intersection = blockBox[axis] - worldPos[axis];
 
                             if (velocity[axis] > 0) {
-                                minCollision = Math.min(minCollision, intersection);
+                                if (intersection < minCollision) {
+                                    minCollision = intersection;
+                                }
                             } else if (velocity[axis] < 0) {
-                                maxCollision = Math.max(maxCollision, intersection + 1);
+                                if (intersection + 1 > maxCollision) {
+                                    maxCollision = intersection + 1;
+                                }
                             }
                         }
-                    }
+                    });
                 }
             }
         });
@@ -63,11 +89,6 @@ export function checkCollision(entity, deltaTime) {
             if (axis === 'y') collisionInfo.onGround = true;
         }
     });
-
-    // Add debug logging
-    console.log('Collision Info:', collisionInfo);
-    console.log('Player Position:', position);
-    console.log('Player Velocity:', velocity);
 
     return collisionInfo;
 }
