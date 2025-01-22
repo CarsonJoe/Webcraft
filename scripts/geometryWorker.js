@@ -97,8 +97,11 @@ function generateGeometry(chunkX, chunkZ, chunkData, adjacentChunks) {
                 const baseColor = hexToRGB(materials[blockType].color);
                 
                 // Generate color variation
-                const colorVariation = (Math.sin(worldX * 100 + worldZ * 50 + y * 20) * 0.1) - 0.05;
-                const finalColor = baseColor.map(c => Math.min(1, Math.max(0, c + colorVariation)));
+                
+                const variation = (colorPRNG() - 0.5) * 0.1; // ±15% variation
+                const finalColor = baseColor.map(c => 
+                    Math.min(1, Math.max(0, c + variation))
+                );
 
                 // Check neighbors using adjacent chunks
                 const neighbors = {
