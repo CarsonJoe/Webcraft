@@ -5,58 +5,22 @@ let materials = {};
 let seed = 0;
 let colorPRNG = null;
 
-const VARIATION_CONFIG = {
-    1: { // Grass
-        scale: 1.2,    // Smaller numbers = more variation
-        intensity: 0.15, // 30% max variation
-        channelBias: [0.8, 1.2, 0.9] // RGB multipliers
-    },
-    2: { // Dirt
-        scale: 1.5,
-        intensity: 0.25,
-        channelBias: [1.0, 0.9, 0.8]
-    },
-    3: { // Stone
-        scale: 2.0,
-        intensity: 0.2,
-        channelBias: [1.1, 1.1, 1.0]
-    },
-    4: { // Sand
-        scale: 2.5,
-        intensity: 0.1,
-        channelBias: [1.2, 1.1, 0.9]
-    },
-    6: { // Wood
-        scale: 1.7,
-        intensity: 0.25,
-        channelBias: [0.9, 0.8, 0.7]
-    },
-    7: { // Leaves
-        scale: 0.7,
-        intensity: 0.4,
-        channelBias: [0.7, 1.3, 0.6]
-    },
-    8: { // Slate
-        scale: 1.9,
-        intensity: 0.35,
-        channelBias: [0.8, 0.9, 1.2]
-    },
-    9: { // Limestone
-        scale: 2.2,
-        intensity: 0.3,
-        channelBias: [1.0, 1.0, 1.0]
-    }
-};
-
 function fastVariation(x, y, z) {
-    // Xorshift32 algorithm for fast random values
+    // Use more iterations of bit mixing to get better distribution
     let seed = x * 3191 ^ y * 1337 ^ z * 7919;
+    
+    // Additional mixing steps
     seed ^= seed << 13;
     seed ^= seed >> 17;
     seed ^= seed << 5;
-    return (seed & 0x7fffffff) / 0x7fffffff; // Returns 0-1
+    seed ^= seed >> 7;  // Added one more mix
+    seed ^= seed << 11; // And another
+    
+    // Get a more granular value by using more bits
+    return (seed & 0x3fffffff) / 0x3fffffff; // Using 30 bits instead of 31
 }
 
+// Keep your original getBlockVariation function exactly as it was:
 function getBlockVariation(worldX, y, worldZ, blockType) {
     const config = VARIATION_CONFIG[blockType] || {};
     if (!config.scale) return [1, 1, 1];
@@ -84,6 +48,49 @@ function getBlockVariation(worldX, y, worldZ, blockType) {
         1 + (v - 0.5) * config.intensity * (config.channelBias?.[i] || 1)
     );
 }
+
+const VARIATION_CONFIG = {
+    1: { // Grass
+        scale: .2,     // Increased scale for more gradual changes
+        intensity: 0.08,  // Reduced intensity
+        channelBias: [0.9, 1.1, 0.9]
+    },
+    2: { // Dirt
+        scale: .4,
+        intensity: 0.15,
+        channelBias: [1.0, 0.95, 0.9]
+    },
+    3: { // Stone
+        scale: .3,
+        intensity: 0.1,
+        channelBias: [1.0, 1.0, 1.0]
+    },
+    4: { // Sand
+        scale: 1,
+        intensity: 0.05,
+        channelBias: [1.1, 1.05, 0.95]
+    },
+    6: { // Wood
+        scale: 2.0,
+        intensity: 0.15,
+        channelBias: [0.95, 0.9, 0.85]
+    },
+    7: { // Leaves
+        scale: .1,
+        intensity: 0.4,
+        channelBias: [0.8, 1.2, 0.7]
+    },
+    8: { // Slate
+        scale: .3,
+        intensity: 0.15,
+        channelBias: [0.9, 0.95, 1.1]
+    },
+    9: { // Limestone
+        scale: .4,
+        intensity: 0.12,
+        channelBias: [1.0, 1.0, 1.0]
+    }
+};
 
 function createPRNG(seed) {
     return function () {
