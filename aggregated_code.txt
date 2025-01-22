@@ -86,7 +86,7 @@ export const CHUNK_SIZE = 8;
 export const CHUNK_HEIGHT = 100;
 export const WATER_LEVEL = 24;
 export const BEACH_LEVEL = WATER_LEVEL + 2;
-export const RENDER_DISTANCE = 20;
+export const RENDER_DISTANCE = 15;
 
 ================================================================================
 File: ./scripts/main.js
@@ -1770,8 +1770,11 @@ function generateGeometry(chunkX, chunkZ, chunkData, adjacentChunks) {
                 const baseColor = hexToRGB(materials[blockType].color);
                 
                 // Generate color variation
-                const colorVariation = (Math.sin(worldX * 100 + worldZ * 50 + y * 20) * 0.1) - 0.05;
-                const finalColor = baseColor.map(c => Math.min(1, Math.max(0, c + colorVariation)));
+                
+                const variation = (colorPRNG() - 0.5) * 0.1; // ±15% variation
+                const finalColor = baseColor.map(c => 
+                    Math.min(1, Math.max(0, c + variation))
+                );
 
                 // Check neighbors using adjacent chunks
                 const neighbors = {
