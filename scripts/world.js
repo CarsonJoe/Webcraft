@@ -227,8 +227,8 @@ function updateAdjacentChunks(chunkX, chunkZ) {
     neighbors.forEach(([x, z]) => {
         const key = `${x},${z}`;
         if (chunks[key] && chunkStates[key] === CHUNK_LOADED) {
-            // Queue for geometry update instead of direct call
-            addToLoadQueue(x, z, 0); // Highest priority
+            // Send existing adjacent chunks to geometry worker for mesh regeneration
+            sendChunkToGeometryWorker(x, z);
         }
     });
 }

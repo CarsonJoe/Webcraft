@@ -223,25 +223,37 @@ function generateGeometry(chunkX, chunkZ, chunkData, adjacentChunks) {
 }
 
 function getBlockInWorld(currentChunkX, currentChunkZ, localX, localY, localZ, currentChunkData, adjacentChunks) {
+    // Handle Y bounds checking first
+    if (localY < 0 || localY >= CHUNK_HEIGHT) {
+        return 0; // Return air for out of bounds Y
+    }
+
+    // Calculate world coordinates
     const worldX = currentChunkX * CHUNK_SIZE + localX;
     const worldZ = currentChunkZ * CHUNK_SIZE + localZ;
 
-    const chunkX = Math.floor(worldX / CHUNK_SIZE);
-    const chunkZ = Math.floor(worldZ / CHUNK_SIZE);
+    // Calculate target chunk coordinates
+    const targetChunkX = Math.floor(worldX / CHUNK_SIZE);
+    const targetChunkZ = Math.floor(worldZ / CHUNK_SIZE);
 
-    const adjLocalX = (worldX % CHUNK_SIZE + CHUNK_SIZE) % CHUNK_SIZE;
-    const adjLocalZ = (worldZ % CHUNK_SIZE + CHUNK_SIZE) % CHUNK_SIZE;
+    // Calculate local coordinates within target chunk
+    const targetLocalX = ((worldX % CHUNK_SIZE) + CHUNK_SIZE) % CHUNK_SIZE;
+    const targetLocalZ = ((worldZ % CHUNK_SIZE) + CHUNK_SIZE) % CHUNK_SIZE;
 
-    if (chunkX === currentChunkX && chunkZ === currentChunkZ) {
-        return getBlock(currentChunkData, adjLocalX, localY, adjLocalZ);
-    } else {
-        const chunkKey = `${chunkX},${chunkZ}`;
-        if (adjacentChunks[chunkKey]) {
-            const adjChunkData = new Int8Array(adjacentChunks[chunkKey]);
-            return getBlock(adjChunkData, adjLocalX, localY, adjLocalZ);
-        }
-        return 0; // Treat unloaded chunks as air
+    // If we're in the current chunk, use current chunk data
+    if (targetChunkX === currentChunkX && targetChunkZ === currentChunkZ) {
+        return getBlock(currentChunkData, targetLocalX, localY, targetLocalZ);
     }
+
+    // Otherwise, look for adjacent chunk data
+    const chunkKey = `${targetChunkX},${targetChunkZ}`;
+    if (adjacentChunks && adjacentChunks[chunkKey]) {
+        const adjChunkData = new Int8Array(adjacentChunks[chunkKey]);
+        return getBlock(adjChunkData, targetLocalX, localY, targetLocalZ);
+    }
+
+    // If we can't find the chunk data, return air
+    return 0;
 }
 
 // Helper functions
