@@ -455,19 +455,6 @@ function cleanupChunkData(chunkKey) {
     // Clear chunk data
     delete chunks[chunkKey];
     delete chunkStates[chunkKey];
-
-    // Clear block color cache
-    const [chunkX, chunkZ] = chunkKey.split(',').map(Number);
-    const startX = chunkX * CHUNK_SIZE;
-    const startZ = chunkZ * CHUNK_SIZE;
-
-    for (let x = startX; x < startX + CHUNK_SIZE; x++) {
-        for (let z = startZ; z < startZ + CHUNK_SIZE; z++) {
-            for (let y = 0; y < CHUNK_HEIGHT; y++) {
-                blockColors.delete(`${x},${y},${z}`);
-            }
-        }
-    }
 }
 
 function findSuitableSpawnPoint(chunkX, chunkZ) {

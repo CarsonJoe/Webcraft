@@ -1,6 +1,3 @@
-import { CHUNK_HEIGHT, CHUNK_SIZE } from './constants.js';
-import { getBlock, chunks, materials, blockColors } from './world.js';
-
 let renderer, camera;
 export let scene = new THREE.Scene(); 
 export const chunkMeshes = {};
@@ -57,19 +54,6 @@ export function updateFPSCounter() {
         frameCount = 0;
         lastTime = currentTime;
     }
-}
-
-export function getBlockColor(x, y, z, baseColor) {
-    const key = `${x},${y},${z}`;
-    if (!blockColors.has(key)) {
-        const color = new THREE.Color(baseColor);
-        const hsl = {};
-        color.getHSL(hsl);
-        hsl.l = Math.max(0, Math.min(1, hsl.l + (Math.random() - 0.5) * 0.1));
-        color.setHSL(hsl.h, hsl.s, hsl.l);
-        blockColors.set(key, color);
-    }
-    return blockColors.get(key);
 }
 
 // Create a translucent material for water

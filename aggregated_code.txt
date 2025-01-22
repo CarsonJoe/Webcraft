@@ -1101,13 +1101,43 @@ function updateBlock(x, y, z, newBlockType) {
     const index = localX + localZ * CHUNK_SIZE + y * CHUNK_SIZE * CHUNK_SIZE;
     chunks[chunkKey][index] = newBlockType;
 
-    // Queue for geometry update instead of direct call
-    addToLoadQueue(chunkX, chunkZ, 0); // Highest priority
+    addToLoadQueue(chunkX, chunkZ, 0);
+    sendChunkToGeometryWorker(chunkX, chunkZ);
 
-    if (localX === 0) addToLoadQueue(chunkX - 1, chunkZ, 0);
-    if (localX === CHUNK_SIZE - 1) addToLoadQueue(chunkX + 1, chunkZ, 0);
-    if (localZ === 0) addToLoadQueue(chunkX, chunkZ - 1, 0);
-    if (localZ === CHUNK_SIZE - 1) addToLoadQueue(chunkX, chunkZ + 1, 0);
+    if (localX === 0) sendChunkToGeometryWorker(chunkX - 1, chunkZ);
+    if (localX === CHUNK_SIZE - 1) sendChunkToGeometryWorker(chunkX + 1, chunkZ);
+    if (localZ === 0) sendChunkToGeometryWorker(chunkX, chunkZ - 1);
+    if (localZ === CHUNK_SIZE - 1) sendChunkToGeometryWorker(chunkX, chunkZ + 1);
+}
+
+function sendChunkToGeometryWorker(chunkX, chunkZ) {
+    const chunkKey = `${chunkX},${chunkZ}`;
+    if (!chunks[chunkKey]) return;
+
+    const chunkData = chunks[chunkKey];
+    const clonedChunkData = new Int8Array(chunkData).buffer;
+
+    const adjacentChunks = {};
+    [[1,0], [-1,0], [0,1], [0,-1]].forEach(([dx, dz]) => {
+        const adjChunkX = chunkX + dx;
+        const adjChunkZ = chunkZ + dz;
+        const adjKey = `${adjChunkX},${adjChunkZ}`;
+        if (chunks[adjKey]) {
+            const adjClone = new Int8Array(chunks[adjKey]).buffer;
+            adjacentChunks[adjKey] = adjClone;
+        }
+    });
+
+    const transferList = [clonedChunkData];
+    Object.values(adjacentChunks).forEach(buffer => transferList.push(buffer));
+
+    geometryWorker.postMessage({
+        type: 'process_chunk',
+        chunkX,
+        chunkZ,
+        chunkData: clonedChunkData,
+        adjacentChunks
+    }, transferList);
 }
 
 function updateChunks(playerPosition) {

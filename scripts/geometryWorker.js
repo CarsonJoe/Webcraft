@@ -5,6 +5,86 @@ let materials = {};
 let seed = 0;
 let colorPRNG = null;
 
+const VARIATION_CONFIG = {
+    1: { // Grass
+        scale: 1.2,    // Smaller numbers = more variation
+        intensity: 0.15, // 30% max variation
+        channelBias: [0.8, 1.2, 0.9] // RGB multipliers
+    },
+    2: { // Dirt
+        scale: 1.5,
+        intensity: 0.25,
+        channelBias: [1.0, 0.9, 0.8]
+    },
+    3: { // Stone
+        scale: 2.0,
+        intensity: 0.2,
+        channelBias: [1.1, 1.1, 1.0]
+    },
+    4: { // Sand
+        scale: 2.5,
+        intensity: 0.1,
+        channelBias: [1.2, 1.1, 0.9]
+    },
+    6: { // Wood
+        scale: 1.7,
+        intensity: 0.25,
+        channelBias: [0.9, 0.8, 0.7]
+    },
+    7: { // Leaves
+        scale: 0.7,
+        intensity: 0.4,
+        channelBias: [0.7, 1.3, 0.6]
+    },
+    8: { // Slate
+        scale: 1.9,
+        intensity: 0.35,
+        channelBias: [0.8, 0.9, 1.2]
+    },
+    9: { // Limestone
+        scale: 2.2,
+        intensity: 0.3,
+        channelBias: [1.0, 1.0, 1.0]
+    }
+};
+
+function fastVariation(x, y, z) {
+    // Xorshift32 algorithm for fast random values
+    let seed = x * 3191 ^ y * 1337 ^ z * 7919;
+    seed ^= seed << 13;
+    seed ^= seed >> 17;
+    seed ^= seed << 5;
+    return (seed & 0x7fffffff) / 0x7fffffff; // Returns 0-1
+}
+
+function getBlockVariation(worldX, y, worldZ, blockType) {
+    const config = VARIATION_CONFIG[blockType] || {};
+    if (!config.scale) return [1, 1, 1];
+    
+    // Get unique variation per channel
+    const variations = [
+        fastVariation(
+            Math.floor(worldX/config.scale),
+            Math.floor(y/config.scale),
+            Math.floor(worldZ/config.scale)
+        ),
+        fastVariation(
+            Math.floor(worldX/config.scale) + 7919,
+            Math.floor(y/config.scale),
+            Math.floor(worldZ/config.scale)
+        ),
+        fastVariation(
+            Math.floor(worldX/config.scale),
+            Math.floor(y/config.scale) + 3191,
+            Math.floor(worldZ/config.scale)
+        )
+    ];
+
+    return variations.map((v, i) => 
+        1 + (v - 0.5) * config.intensity * (config.channelBias?.[i] || 1)
+    );
+}
+
 function createPRNG(seed) {
     return function () {
         seed = (seed * 9301 + 49297) % 233280;
@@ -90,17 +170,14 @@ function generateGeometry(chunkX, chunkZ, chunkData, adjacentChunks) {
             for (let z = 0; z < CHUNK_SIZE; z++) {
                 const blockType = chunkData[x + z * CHUNK_SIZE + y * CHUNK_SIZE * CHUNK_SIZE];
                 if (blockType === 0) continue;
-
                 const isWater = blockType === 5;
+
                 const worldX = chunkX * CHUNK_SIZE + x;
                 const worldZ = chunkZ * CHUNK_SIZE + z;
                 const baseColor = hexToRGB(materials[blockType].color);
-
-                // Generate color variation
-
-                const variation = (colorPRNG() - 0.5) * 0.1; // ±15% variation
-                const finalColor = baseColor.map(c =>
-                    Math.min(1, Math.max(0, c + variation))
+                const colorMultipliers = getBlockVariation(worldX, y, worldZ, blockType);
+                const finalColor = baseColor.map((c, i) => 
+                    Math.min(1, Math.max(0, c * colorMultipliers[i]))
                 );
 
                 // Check neighbors using adjacent chunks
