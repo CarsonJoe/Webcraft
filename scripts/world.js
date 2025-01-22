@@ -83,17 +83,37 @@ export function initWorld() {
             const { chunkX, chunkZ, chunkData } = e.data;
             const chunkKey = `${chunkX},${chunkZ}`;
     
-            // Store the raw ArrayBuffer and create typed array view
-            chunks[chunkKey] = new Int8Array(chunkData);
-            chunkStates[chunkKey] = CHUNK_LOADED;
+            // 1. Clone the received buffer for main thread storage
+            const clonedBuffer = new ArrayBuffer(chunkData.byteLength);
+            new Int8Array(clonedBuffer).set(new Int8Array(chunkData));
             
-            // Send to geometry worker with proper transfer
+            // 2. Store cloned buffer in chunks
+            chunks[chunkKey] = new Int8Array(clonedBuffer);
+            chunkStates[chunkKey] = CHUNK_LOADED;
+    
+            // 3. Prepare adjacent chunks with fresh buffers
+            const transferList = [chunkData]; // Transfer original buffer
+            const adjacentChunks = {};
+    
+            [[1,0], [-1,0], [0,1], [0,-1]].forEach(([dx, dz]) => {
+                const adjKey = `${chunkX + dx},${chunkZ + dz}`;
+                if (chunks[adjKey]) {
+                    // Clone adjacent chunk's buffer for transfer
+                    const adjClone = new ArrayBuffer(chunks[adjKey].buffer.byteLength);
+                    new Int8Array(adjClone).set(chunks[adjKey]);
+                    adjacentChunks[adjKey] = adjClone;
+                    transferList.push(adjClone);
+                }
+            });
+    
+            // 4. Send message with transferrable buffers
             geometryWorker.postMessage({
                 type: 'process_chunk',
                 chunkX,
                 chunkZ,
-                chunkData: chunkData // Directly use the received ArrayBuffer
-            }, [chunkData]); // Transfer the ArrayBuffer
+                chunkData: chunkData,
+                adjacentChunks
+            }, transferList);
     
             updateAdjacentChunks(chunkX, chunkZ);
         }

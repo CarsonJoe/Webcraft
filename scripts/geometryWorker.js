@@ -20,27 +20,33 @@ self.onmessage = function(e) {
             colorPRNG = createPRNG(seed);
             break;
             
-        case 'process_chunk':
-            const { chunkX, chunkZ, chunkData } = e.data;
-            const result = generateGeometry(chunkX, chunkZ, new Int8Array(chunkData));
-            
-            self.postMessage({
-                type: 'geometry_data',
-                ...result
-            }, [
-                result.solid.positions.buffer,
-                result.solid.normals.buffer,
-                result.solid.colors.buffer,
-                result.solid.indices.buffer,
-                result.water.positions.buffer,
-                result.water.normals.buffer,
-                result.water.indices.buffer
-            ]);
-            break;
-    }
-};
+            case 'process_chunk':
+                const { chunkX, chunkZ, chunkData, adjacentChunks } = e.data; // Add adjacentChunks here
+                const result = generateGeometry(
+                    chunkX, 
+                    chunkZ, 
+                    new Int8Array(chunkData),
+                    adjacentChunks  // Pass adjacent chunks to generateGeometry
+                );
+                
+                self.postMessage({
+                    type: 'geometry_data',
+                    ...result
+                }, [
+                    result.solid.positions.buffer,
+                    result.solid.normals.buffer,
+                    result.solid.colors.buffer,
+                    result.solid.indices.buffer,
+                    result.water.positions.buffer,
+                    result.water.normals.buffer,
+                    result.water.indices.buffer
+                ]);
+                break;
+        }
+    };
+    
 
-function generateGeometry(chunkX, chunkZ, chunkData) {
+function generateGeometry(chunkX, chunkZ, chunkData, adjacentChunks) {
     const solid = { positions: [], normals: [], colors: [], indices: [] };
     const water = { positions: [], normals: [], indices: [] };
 
@@ -91,34 +97,31 @@ function generateGeometry(chunkX, chunkZ, chunkData) {
                 const baseColor = hexToRGB(materials[blockType].color);
                 
                 // Generate color variation
-                colorPRNG.seed = (worldX * 31415821 + worldZ) ^ y;
-                const colorVariation = colorPRNG() * 0.1 - 0.05;
-                const finalColor = baseColor.map(c => 
-                    Math.min(1, Math.max(0, c + colorVariation))
-                );
+                const colorVariation = (Math.sin(worldX * 100 + worldZ * 50 + y * 20) * 0.1) - 0.05;
+                const finalColor = baseColor.map(c => Math.min(1, Math.max(0, c + colorVariation)));
 
-                // Check neighbors
+                // Check neighbors using adjacent chunks
                 const neighbors = {
-                    px: getBlock(chunkData, x+1, y, z),
-                    nx: getBlock(chunkData, x-1, y, z),
-                    py: getBlock(chunkData, x, y+1, z),
-                    ny: getBlock(chunkData, x, y-1, z),
-                    pz: getBlock(chunkData, x, y, z+1),
-                    nz: getBlock(chunkData, x, y, z-1)
+                    px: getBlockInWorld(chunkX, chunkZ, x+1, y, z, chunkData, adjacentChunks),
+                    nx: getBlockInWorld(chunkX, chunkZ, x-1, y, z, chunkData, adjacentChunks),
+                    py: getBlockInWorld(chunkX, chunkZ, x, y+1, z, chunkData, adjacentChunks),
+                    ny: getBlockInWorld(chunkX, chunkZ, x, y-1, z, chunkData, adjacentChunks),
+                    pz: getBlockInWorld(chunkX, chunkZ, x, y, z+1, chunkData, adjacentChunks),
+                    nz: getBlockInWorld(chunkX, chunkZ, x, y, z-1, chunkData, adjacentChunks)
                 };
 
-                // Generate faces
-                if (!neighbors.px || isTransparent(neighbors.px)) 
+                // Generate faces only if neighbor is transparent
+                if (isTransparent(neighbors.px)) 
                     addFace(isWater, [1,0,0], x+1, y, z, finalColor);
-                if (!neighbors.nx || isTransparent(neighbors.nx)) 
+                if (isTransparent(neighbors.nx)) 
                     addFace(isWater, [-1,0,0], x, y, z, finalColor);
-                if (!neighbors.py || isTransparent(neighbors.py)) 
+                if (isTransparent(neighbors.py)) 
                     addFace(isWater, [0,1,0], x, y+1, z, finalColor);
-                if (!neighbors.ny || isTransparent(neighbors.ny)) 
+                if (isTransparent(neighbors.ny)) 
                     addFace(isWater, [0,-1,0], x, y, z, finalColor);
-                if (!neighbors.pz || isTransparent(neighbors.pz)) 
+                if (isTransparent(neighbors.pz)) 
                     addFace(isWater, [0,0,1], x, y, z+1, finalColor);
-                if (!neighbors.nz || isTransparent(neighbors.nz)) 
+                if (isTransparent(neighbors.nz)) 
                     addFace(isWater, [0,0,-1], x, y, z, finalColor);
             }
         }
@@ -130,6 +133,28 @@ function generateGeometry(chunkX, chunkZ, chunkData) {
         solid: packageGeometry(solid),
         water: packageGeometry(water)
     };
+}
+
+function getBlockInWorld(currentChunkX, currentChunkZ, localX, localY, localZ, currentChunkData, adjacentChunks) {
+    const worldX = currentChunkX * CHUNK_SIZE + localX;
+    const worldZ = currentChunkZ * CHUNK_SIZE + localZ;
+
+    const chunkX = Math.floor(worldX / CHUNK_SIZE);
+    const chunkZ = Math.floor(worldZ / CHUNK_SIZE);
+
+    const adjLocalX = (worldX % CHUNK_SIZE + CHUNK_SIZE) % CHUNK_SIZE;
+    const adjLocalZ = (worldZ % CHUNK_SIZE + CHUNK_SIZE) % CHUNK_SIZE;
+
+    if (chunkX === currentChunkX && chunkZ === currentChunkZ) {
+        return getBlock(currentChunkData, adjLocalX, localY, adjLocalZ);
+    } else {
+        const chunkKey = `${chunkX},${chunkZ}`;
+        if (adjacentChunks[chunkKey]) {
+            const adjChunkData = new Int8Array(adjacentChunks[chunkKey]);
+            return getBlock(adjChunkData, adjLocalX, localY, adjLocalZ);
+        }
+        return 0; // Treat unloaded chunks as air
+    }
 }
 
 // Helper functions
