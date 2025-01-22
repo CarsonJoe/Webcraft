@@ -1,6 +1,7 @@
 import Player from './player.js';
 import { CHUNK_HEIGHT } from './constants.js';
 import { updateChunks, setBlock, getBlock, chunks } from './world.js';
+import { initWorld, notifySceneReady, initializationComplete } from './world.js';
 import { createSkybox, initRenderer, updateChunkGeometry, render } from './renderer.js';
 import { updateBlockSelector } from './utils.js';
 
@@ -9,6 +10,8 @@ const scene = new THREE.Scene();
 const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
 
 const renderer = initRenderer(scene, camera);
+initWorld();
+notifySceneReady();
 
 // Create and apply the skybox
 createSkybox(scene, renderer);
@@ -30,11 +33,24 @@ Player.init(camera, scene);
 document.addEventListener('contextmenu', (event) => event.preventDefault());
 
 // Animation loop
+let gameStarted = false;
+
 function animate() {
     requestAnimationFrame(animate);
-    updateChunks(scene, Player.getPosition());
+    
+    if (!gameStarted) {
+        if (initializationComplete) { // From world.js exports
+            gameStarted = true;
+            console.log("[Main] Starting game loop");
+        } else {
+            console.log("[Main] Waiting for initialization...");
+            return;
+        }
+    }
+    
     Player.update(getBlock);
-    render(scene, camera);  // Use the new render function with frustum culling
+    updateChunks(Player.getPosition());
+    render(scene, camera);
 }
 
 animate();

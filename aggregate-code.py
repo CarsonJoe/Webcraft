@@ -64,6 +64,7 @@ def main():
         "./scripts/utils.js",
         "./scripts/world.js",
         "./index.html",
+        "./scripts/chunksWorker.js",
         # Add more file paths as needed
     ]
     

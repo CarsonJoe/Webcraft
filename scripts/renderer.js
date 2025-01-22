@@ -1,8 +1,10 @@
 import { CHUNK_HEIGHT, CHUNK_SIZE } from './constants.js';
 import { getBlock, chunks, materials, blockColors } from './world.js';
 
-let renderer, scene, camera;
+let renderer, camera;
+export let scene;
 export const chunkMeshes = {};
+const pendingChunkUpdates = new Set();
 
 // FPS counter variables
 let fpsCounter;
@@ -70,6 +72,10 @@ const waterMaterial = new THREE.MeshPhongMaterial({
 });
 
 export function updateChunkGeometry(chunkX, chunkZ) {
+    if (!scene) {
+        console.error("Scene not initialized!");
+        return;
+    }
     const chunkKey = `${chunkX},${chunkZ}`;
     const chunk = chunks[chunkKey];
 
@@ -197,17 +203,19 @@ export function updateChunkGeometry(chunkX, chunkZ) {
         water.boundingSphere = water.geometry.boundingSphere.clone();
         water.boundingSphere.center.add(water.position);
     }
+
+    console.log("[Renderer] Rendered Chunk");
 }
 
 export function removeChunkGeometry(chunkX, chunkZ) {
     const chunkKey = `${chunkX},${chunkZ}`;
     if (chunkMeshes[chunkKey]) {
-        scene.remove(chunkMeshes[chunkKey].solid);
-        scene.remove(chunkMeshes[chunkKey].water);
-        chunkMeshes[chunkKey].solid.geometry.dispose();
-        chunkMeshes[chunkKey].water.geometry.dispose();
-        chunkMeshes[chunkKey].solid.material.dispose();
-        chunkMeshes[chunkKey].water.material.dispose();
+        // Dispose geometries and materials properly
+        [chunkMeshes[chunkKey].solid, chunkMeshes[chunkKey].water].forEach(mesh => {
+            scene.remove(mesh);
+            mesh.geometry.dispose();
+            mesh.material.dispose();
+        });
         delete chunkMeshes[chunkKey];
     }
 }

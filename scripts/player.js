@@ -1,10 +1,10 @@
 import { CHUNK_HEIGHT, CHUNK_SIZE } from './constants.js';
-import { getBlock, updateBlock, chunks, generateChunk } from "./world.js";
+import { getBlock, updateBlock, chunks, addToLoadQueue } from "./world.js";
 import { updateBlockSelector } from "./utils.js";
 import { chunkMeshes } from "./renderer.js";
- 
+
 // Player module
-const Player = (function() {
+const Player = (function () {
     // Player constants
     const NORMAL_SPEED = 8; // Units per second
     const SPRINT_SPEED = NORMAL_SPEED * 1.4;
@@ -14,7 +14,7 @@ const Player = (function() {
     const WATER_GRAVITY = 4; // Units per second squared
     const PLAYER_WIDTH = 1.2;
     const PLAYER_HEIGHT = 3.6;
-    const EYE_HEIGHT = 3.2;    
+    const EYE_HEIGHT = 3.2;
     const STEP_HEIGHT = 1.0; // Maximum height of a step the player can automatically climb
 
 
@@ -87,14 +87,14 @@ const Player = (function() {
 
     function onMouseDown(event) {
         if (document.pointerLockElement !== document.querySelector('canvas')) return;
-    
+
         raycaster.setFromCamera(new THREE.Vector2(0, 0), camera);
         const intersects = raycaster.intersectObjects(Object.values(chunkMeshes).flatMap(mesh => [mesh.solid, mesh.water]));
-    
+
         if (intersects.length > 0) {
             const intersect = intersects[0];
             const normal = intersect.face.normal;
-            
+
             if (event.button === 0) { // Left click: remove voxel
                 const position = new THREE.Vector3()
                     .copy(intersect.point)
@@ -122,7 +122,7 @@ const Player = (function() {
         const dy = Math.abs(y - playerPos.y);
         const dz = Math.abs(z - playerPos.z);
 
-        if (dx < PLAYER_WIDTH/2 && dy < PLAYER_HEIGHT && dz < PLAYER_WIDTH/2) {
+        if (dx < PLAYER_WIDTH / 2 && dy < PLAYER_HEIGHT && dz < PLAYER_WIDTH / 2) {
             return false;
         }
 
@@ -247,7 +247,7 @@ const Player = (function() {
             [x - PLAYER_WIDTH / 2, y + PLAYER_HEIGHT, z + PLAYER_WIDTH / 2],
             [x + PLAYER_WIDTH / 2, y + PLAYER_HEIGHT, z + PLAYER_WIDTH / 2]
         ];
-    
+
         for (const [px, py, pz] of positions) {
             const blockType = getBlockGlobal(px, py, pz);
             if (blockType !== 0 && blockType !== 5) { // Not air and not water
@@ -256,7 +256,7 @@ const Player = (function() {
         }
         return false;
     }
-    
+
     function checkWaterCollision(x, y, z) {
         const blockType = getBlock(Math.floor(x), Math.floor(y), Math.floor(z));
         return blockType === 5; // 5 is the water block type
@@ -270,23 +270,26 @@ const Player = (function() {
         return yawObject;
     }
 
+
     function getBlockGlobal(x, y, z) {
         const chunkX = Math.floor(x / CHUNK_SIZE);
         const chunkZ = Math.floor(z / CHUNK_SIZE);
         const chunkKey = `${chunkX},${chunkZ}`;
-    
-        // Ensure the chunk is loaded
+
+        // Request chunk generation if missing
         if (!chunks[chunkKey]) {
-            chunks[chunkKey] = generateChunk(chunkX, chunkZ);
+            // Add to load queue instead of generating directly
+            addToLoadQueue(chunkX, chunkZ, Infinity);
+            return 0; // Temporarily return air until chunk loads
         }
-    
+
         const localX = Math.floor(((x % CHUNK_SIZE) + CHUNK_SIZE) % CHUNK_SIZE);
         const localZ = Math.floor(((z % CHUNK_SIZE) + CHUNK_SIZE) % CHUNK_SIZE);
         const localY = Math.floor(y);
-    
-        if (localY < 0) return 1; // Treat below-world as solid
-        if (localY >= CHUNK_HEIGHT) return 0; // Treat above-world as air
-    
+
+        if (localY < 0) return 1;
+        if (localY >= CHUNK_HEIGHT) return 0;
+
         return chunks[chunkKey][localX + localZ * CHUNK_SIZE + localY * CHUNK_SIZE * CHUNK_SIZE] || 0;
     }
 

@@ -29,6 +29,7 @@ export function checkCollision(entity, deltaTime) {
     };
 
     ['x', 'y', 'z'].forEach(axis => {
+        if (Math.abs(velocity[axis]) < 0.0001) return;
         let minCollision = Infinity;
         let maxCollision = -Infinity;
 
@@ -94,6 +95,7 @@ File: ./scripts/main.js
 import Player from './player.js';
 import { CHUNK_HEIGHT } from './constants.js';
 import { updateChunks, setBlock, getBlock, chunks } from './world.js';
+import { initWorld, notifySceneReady, initializationComplete } from './world.js';
 import { createSkybox, initRenderer, updateChunkGeometry, render } from './renderer.js';
 import { updateBlockSelector } from './utils.js';
 
@@ -102,6 +104,8 @@ const scene = new THREE.Scene();
 const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
 
 const renderer = initRenderer(scene, camera);
+initWorld();
+notifySceneReady();
 
 // Create and apply the skybox
 createSkybox(scene, renderer);
@@ -123,11 +127,24 @@ Player.init(camera, scene);
 document.addEventListener('contextmenu', (event) => event.preventDefault());
 
 // Animation loop
+let gameStarted = false;
+
 function animate() {
     requestAnimationFrame(animate);
-    updateChunks(scene, Player.getPosition());
+    
+    if (!gameStarted) {
+        if (initializationComplete) { // From world.js exports
+            gameStarted = true;
+            console.log("[Main] Starting game loop");
+        } else {
+            console.log("[Main] Waiting for initialization...");
+            return;
+        }
+    }
+    
     Player.update(getBlock);
-    render(scene, camera);  // Use the new render function with frustum culling
+    updateChunks(Player.getPosition());
+    render(scene, camera);
 }
 
 animate();
@@ -151,12 +168,12 @@ File: ./scripts/player.js
 ================================================================================
 
 import { CHUNK_HEIGHT, CHUNK_SIZE } from './constants.js';
-import { getBlock, updateBlock, chunks, generateChunk } from "./world.js";
+import { getBlock, updateBlock, chunks, addToLoadQueue } from "./world.js";
 import { updateBlockSelector } from "./utils.js";
 import { chunkMeshes } from "./renderer.js";
- 
+
 // Player module
-const Player = (function() {
+const Player = (function () {
     // Player constants
     const NORMAL_SPEED = 8; // Units per second
     const SPRINT_SPEED = NORMAL_SPEED * 1.4;
@@ -166,7 +183,7 @@ const Player = (function() {
     const WATER_GRAVITY = 4; // Units per second squared
     const PLAYER_WIDTH = 1.2;
     const PLAYER_HEIGHT = 3.6;
-    const EYE_HEIGHT = 3.2;    
+    const EYE_HEIGHT = 3.2;
     const STEP_HEIGHT = 1.0; // Maximum height of a step the player can automatically climb
 
 
@@ -239,14 +256,14 @@ const Player = (function() {
 
     function onMouseDown(event) {
         if (document.pointerLockElement !== document.querySelector('canvas')) return;
-    
+
         raycaster.setFromCamera(new THREE.Vector2(0, 0), camera);
         const intersects = raycaster.intersectObjects(Object.values(chunkMeshes).flatMap(mesh => [mesh.solid, mesh.water]));
-    
+
         if (intersects.length > 0) {
             const intersect = intersects[0];
             const normal = intersect.face.normal;
-            
+
             if (event.button === 0) { // Left click: remove voxel
                 const position = new THREE.Vector3()
                     .copy(intersect.point)
@@ -274,7 +291,7 @@ const Player = (function() {
         const dy = Math.abs(y - playerPos.y);
         const dz = Math.abs(z - playerPos.z);
 
-        if (dx < PLAYER_WIDTH/2 && dy < PLAYER_HEIGHT && dz < PLAYER_WIDTH/2) {
+        if (dx < PLAYER_WIDTH / 2 && dy < PLAYER_HEIGHT && dz < PLAYER_WIDTH / 2) {
             return false;
         }
 
@@ -399,7 +416,7 @@ const Player = (function() {
             [x - PLAYER_WIDTH / 2, y + PLAYER_HEIGHT, z + PLAYER_WIDTH / 2],
             [x + PLAYER_WIDTH / 2, y + PLAYER_HEIGHT, z + PLAYER_WIDTH / 2]
         ];
-    
+
         for (const [px, py, pz] of positions) {
             const blockType = getBlockGlobal(px, py, pz);
             if (blockType !== 0 && blockType !== 5) { // Not air and not water
@@ -408,7 +425,7 @@ const Player = (function() {
         }
         return false;
     }
-    
+
     function checkWaterCollision(x, y, z) {
         const blockType = getBlock(Math.floor(x), Math.floor(y), Math.floor(z));
         return blockType === 5; // 5 is the water block type
@@ -422,23 +439,26 @@ const Player = (function() {
         return yawObject;
     }
 
+
     function getBlockGlobal(x, y, z) {
         const chunkX = Math.floor(x / CHUNK_SIZE);
         const chunkZ = Math.floor(z / CHUNK_SIZE);
         const chunkKey = `${chunkX},${chunkZ}`;
-    
-        // Ensure the chunk is loaded
+
+        // Request chunk generation if missing
         if (!chunks[chunkKey]) {
-            chunks[chunkKey] = generateChunk(chunkX, chunkZ);
+            // Add to load queue instead of generating directly
+            addToLoadQueue(chunkX, chunkZ, Infinity);
+            return 0; // Temporarily return air until chunk loads
         }
-    
+
         const localX = Math.floor(((x % CHUNK_SIZE) + CHUNK_SIZE) % CHUNK_SIZE);
         const localZ = Math.floor(((z % CHUNK_SIZE) + CHUNK_SIZE) % CHUNK_SIZE);
         const localY = Math.floor(y);
-    
-        if (localY < 0) return 1; // Treat below-world as solid
-        if (localY >= CHUNK_HEIGHT) return 0; // Treat above-world as air
-    
+
+        if (localY < 0) return 1;
+        if (localY >= CHUNK_HEIGHT) return 0;
+
         return chunks[chunkKey][localX + localZ * CHUNK_SIZE + localY * CHUNK_SIZE * CHUNK_SIZE] || 0;
     }
 
@@ -459,11 +479,21 @@ export default Player;
 File: ./scripts/renderer.js
 ================================================================================
 
+import * as THREE from 'https://cdn.skypack.dev/three@0.136.0';
+
 import { CHUNK_HEIGHT, CHUNK_SIZE } from './constants.js';
 import { getBlock, chunks, materials, blockColors } from './world.js';
 
-let renderer, scene, camera;
+
+let renderer, camera;
+export let scene;
 export const chunkMeshes = {};
+const pendingChunkUpdates = new Set();
+
+const geometryWorker = new Worker(new URL('./geometryWorker.js', import.meta.url), {
+    type: 'module'
+});
+export const geometryQueue = new Map();
 
 // FPS counter variables
 let fpsCounter;
@@ -476,7 +506,7 @@ export function initRenderer(scn, cam) {
     renderer = new THREE.WebGLRenderer({ antialias: false });
     renderer.setSize(window.innerWidth, window.innerHeight);
     document.body.appendChild(renderer.domElement);
-    
+
     scene.fog = new THREE.Fog(0x619dde, 20, 300);  // Sky blue color, start fading at 20 units, fully faded at 500 units
 
     createFPSCounter();
@@ -500,7 +530,7 @@ function createFPSCounter() {
 export function updateFPSCounter() {
     frameCount++;
     const currentTime = performance.now();
-    
+
     if (currentTime > lastTime + 1000) {
         const fps = Math.round((frameCount * 1000) / (currentTime - lastTime));
         fpsCounter.textContent = `FPS: ${fps}`;
@@ -509,124 +539,64 @@ export function updateFPSCounter() {
     }
 }
 
-export function getBlockColor(x, y, z, baseColor) {
-    const key = `${x},${y},${z}`;
-    if (!blockColors.has(key)) {
-        const color = new THREE.Color(baseColor);
-        const hsl = {};
-        color.getHSL(hsl);
-        hsl.l = Math.max(0, Math.min(1, hsl.l + (Math.random() - 0.5) * 0.1));
-        color.setHSL(hsl.h, hsl.s, hsl.l);
-        blockColors.set(key, color);
-    }
-    return blockColors.get(key);
-}
+
 
 // Create a translucent material for water
 const waterMaterial = new THREE.MeshPhongMaterial({
     color: 0x6380ec,
     transparent: true,
     opacity: 0.7,
-    side: THREE.DoubleSide
+    side: THREE.DoubleSide,
+    depthWrite: false // Important for transparency
 });
 
 export function updateChunkGeometry(chunkX, chunkZ) {
     const chunkKey = `${chunkX},${chunkZ}`;
     const chunk = chunks[chunkKey];
 
-    if (!chunk) {
-        console.error(`Chunk ${chunkKey} not found`);
-        return;
-    }
+    if (!chunk) return;
 
-    const positions = [];
-    const normals = [];
-    const colors = [];
-    const indices = [];
-    const waterPositions = [];
-    const waterNormals = [];
-    const waterIndices = [];
+    // Clone the chunk data to avoid detaching original buffer
+    const chunkCopy = new Int8Array(chunk);
+
+    geometryQueue.set(chunkKey, { status: 'processing' });
+    geometryWorker.postMessage({
+        chunkX,
+        chunkZ,
+        chunkData: chunkCopy.buffer
+    }, [chunkCopy.buffer]);
+}
+
+geometryWorker.onmessage = function (e) {
+    const { chunkX, chunkZ, positions, normals, colors, indices,
+        waterPositions, waterNormals, waterIndices } = e.data;
 
 
-    function isTransparent(x, y, z) {
-        const blockType = getBlock(x, y, z);
-        return blockType === 0; // Air or water
-    }
+    const chunkKey = `${chunkX},${chunkZ}`;
 
-    for (let x = 0; x < CHUNK_SIZE; x++) {
-        for (let y = 0; y < CHUNK_HEIGHT; y++) {
-            for (let z = 0; z < CHUNK_SIZE; z++) {
-                const index = x + z * CHUNK_SIZE + y * CHUNK_SIZE * CHUNK_SIZE;
-                const blockType = chunk[index];
-                if (blockType === 0) continue; // Skip air blocks
-
-                const worldX = chunkX * CHUNK_SIZE + x;
-                const worldY = y;
-                const worldZ = chunkZ * CHUNK_SIZE + z;
-
-                const baseColor = materials[blockType].color;
-                const variedColor = getBlockColor(worldX, worldY, worldZ, baseColor);
-
-                // Check each face
-                const faces = [
-                    { normal: [0, 0, 1], vertices: [[0, 0, 1], [1, 0, 1], [1, 1, 1], [0, 1, 1]] },
-                    { normal: [0, 0, -1], vertices: [[1, 0, 0], [0, 0, 0], [0, 1, 0], [1, 1, 0]] },
-                    { normal: [1, 0, 0], vertices: [[1, 0, 1], [1, 0, 0], [1, 1, 0], [1, 1, 1]] },
-                    { normal: [-1, 0, 0], vertices: [[0, 0, 0], [0, 0, 1], [0, 1, 1], [0, 1, 0]] },
-                    { normal: [0, 1, 0], vertices: [[0, 1, 1], [1, 1, 1], [1, 1, 0], [0, 1, 0]] },
-                    { normal: [0, -1, 0], vertices: [[0, 0, 0], [1, 0, 0], [1, 0, 1], [0, 0, 1]] }
-                ];
-
-                for (const [faceIndex, face] of faces.entries()) {
-                    const nx = worldX + face.normal[0];
-                    const ny = worldY + face.normal[1];
-                    const nz = worldZ + face.normal[2];
-
-                    const shouldRenderFace = blockType === 5 
-                        ? isTransparent(nx, ny, nz)  // For water, only render if adjacent to air
-                        : isTransparent(nx, ny, nz) || getBlock(nx, ny, nz) === 5;  // For other blocks, render if adjacent to air or water
-
-                    if (shouldRenderFace) {
-                        // Add face
-                        const baseIndex = blockType === 5 ? waterPositions.length / 3 : positions.length / 3;
-                        for (const vertex of face.vertices) {
-                            if (blockType === 5) {
-                                waterPositions.push(x + vertex[0], y + vertex[1], z + vertex[2]);
-                                waterNormals.push(...face.normal);
-                            } else {
-                                positions.push(x + vertex[0], y + vertex[1], z + vertex[2]);
-                                normals.push(...face.normal);
-                                colors.push(variedColor.r, variedColor.g, variedColor.b);
-                            }
-                        }
-                        if (blockType === 5) {
-                            waterIndices.push(
-                                baseIndex, baseIndex + 1, baseIndex + 2,
-                                baseIndex, baseIndex + 2, baseIndex + 3
-                            );
-                        } else {
-                            indices.push(
-                                baseIndex, baseIndex + 1, baseIndex + 2,
-                                baseIndex, baseIndex + 2, baseIndex + 3
-                            );
-                        }
-                    }
-                }
-            }
+    // Convert arrays to Three.js buffers
+    const createBuffer = (data, itemSize) => {
+        if (!data || data.length === 0) {
+            // Return empty buffer if no data
+            return new THREE.BufferAttribute(new Float32Array(0), itemSize);
         }
-    }
+        return new THREE.BufferAttribute(new Float32Array(data), itemSize);
+    };
 
     const geometry = new THREE.BufferGeometry();
-    geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
-    geometry.setAttribute('normal', new THREE.Float32BufferAttribute(normals, 3));
-    geometry.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
+    geometry.setAttribute('position', createBuffer(positions, 3));
+    geometry.setAttribute('normal', createBuffer(normals, 3));
+    geometry.setAttribute('color', new THREE.BufferAttribute(
+        new Float32Array(colors.flat()), 3
+    ));
     geometry.setIndex(indices);
 
     const waterGeometry = new THREE.BufferGeometry();
-    waterGeometry.setAttribute('position', new THREE.Float32BufferAttribute(waterPositions, 3));
-    waterGeometry.setAttribute('normal', new THREE.Float32BufferAttribute(waterNormals, 3));
+    waterGeometry.setAttribute('position', createBuffer(waterPositions, 3));
+    waterGeometry.setAttribute('normal', createBuffer(waterNormals, 3));
     waterGeometry.setIndex(waterIndices);
 
+    // Update meshes
     if (chunkMeshes[chunkKey]) {
         scene.remove(chunkMeshes[chunkKey].solid);
         scene.remove(chunkMeshes[chunkKey].water);
@@ -636,6 +606,7 @@ export function updateChunkGeometry(chunkX, chunkZ) {
     const solidMesh = new THREE.Mesh(geometry, material);
     const waterMesh = new THREE.Mesh(waterGeometry, waterMaterial);
 
+    // Position and add to scene
     solidMesh.position.set(chunkX * CHUNK_SIZE, 0, chunkZ * CHUNK_SIZE);
     waterMesh.position.set(chunkX * CHUNK_SIZE, 0, chunkZ * CHUNK_SIZE);
 
@@ -643,32 +614,18 @@ export function updateChunkGeometry(chunkX, chunkZ) {
     scene.add(waterMesh);
 
     chunkMeshes[chunkKey] = { solid: solidMesh, water: waterMesh };
-
-    // Calculate bounding spheres for solid and water meshes
-    if (chunkMeshes[chunkKey]) {
-        const { solid, water } = chunkMeshes[chunkKey];
-        
-        // Compute bounding sphere for solid mesh
-        solid.geometry.computeBoundingSphere();
-        solid.boundingSphere = solid.geometry.boundingSphere.clone();
-        solid.boundingSphere.center.add(solid.position);
-
-        // Compute bounding sphere for water mesh
-        water.geometry.computeBoundingSphere();
-        water.boundingSphere = water.geometry.boundingSphere.clone();
-        water.boundingSphere.center.add(water.position);
-    }
-}
+    geometryQueue.delete(chunkKey);
+};
 
 export function removeChunkGeometry(chunkX, chunkZ) {
     const chunkKey = `${chunkX},${chunkZ}`;
     if (chunkMeshes[chunkKey]) {
-        scene.remove(chunkMeshes[chunkKey].solid);
-        scene.remove(chunkMeshes[chunkKey].water);
-        chunkMeshes[chunkKey].solid.geometry.dispose();
-        chunkMeshes[chunkKey].water.geometry.dispose();
-        chunkMeshes[chunkKey].solid.material.dispose();
-        chunkMeshes[chunkKey].water.material.dispose();
+        // Dispose geometries and materials properly
+        [chunkMeshes[chunkKey].solid, chunkMeshes[chunkKey].water].forEach(mesh => {
+            scene.remove(mesh);
+            mesh.geometry.dispose();
+            mesh.material.dispose();
+        });
         delete chunkMeshes[chunkKey];
     }
 }
@@ -681,7 +638,7 @@ export function createSkybox(scene, renderer) {
             const rt = new THREE.WebGLCubeRenderTarget(texture.image.height);
             rt.fromEquirectangularTexture(renderer, texture);
             scene.background = rt.texture;
-            
+
             // Set the fog color to match the sky color
             const skyColor = new THREE.Color().setHSL(0.6, 1, 0.9);  // Adjust these values to match your sky texture
             scene.fog.color.copy(skyColor);
@@ -704,7 +661,7 @@ export function render(scene, camera) {
 
     for (const chunkKey in chunkMeshes) {
         const { solid, water } = chunkMeshes[chunkKey];
-        
+
         if (solid.boundingSphere) {
             solid.visible = frustum.intersectsSphere(solid.boundingSphere);
         } else {
@@ -774,24 +731,35 @@ export function getBlockName(blockType) {
 File: ./scripts/world.js
 ================================================================================
 
-import { CHUNK_SIZE, CHUNK_HEIGHT, WATER_LEVEL, BEACH_LEVEL, RENDER_DISTANCE } from './constants.js';
-import { chunkMeshes, updateChunkGeometry } from './renderer.js';
 
-const simplex = new SimplexNoise();
-const blockColors = new Map();
+import { CHUNK_SIZE, CHUNK_HEIGHT, WATER_LEVEL, RENDER_DISTANCE } from './constants.js';
+import { chunkMeshes, updateChunkGeometry, removeChunkGeometry, geometryQueue } from './renderer.js';
 
+// Chunk states and initialization flags
+const CHUNK_LOADING = 1;
+const CHUNK_LOADED = 2;
+let chunkWorker = null;
+let initializationComplete = false;
+let workerInitialized = false;
+let sceneReady = false;
+
+// Chunk storage and queues
 const chunks = {};
 const chunkStates = {};
 const chunkLoadQueue = [];
-let frameCounter = 0;
-const chunkUpdateQueue = [];
-const chunkRemovalQueue = [];
-let lastFrameTime = performance.now();
-let frameBudget = 16; // Start with 16ms budget (60 FPS target)
-const MAX_CHUNKS_PER_FRAME = 4; // Maximum chunks to process in one frame
+const blockColors = new Map();
 
+let currentPlayerChunkX = 0;
+let currentPlayerChunkZ = 0;
+
+// Performance management
+const MAX_CHUNKS_PER_FRAME = 50;
+let frameBudget = 16; // Start with 16ms (~60fps)
+let lastFrameTime = performance.now();
+
+// Materials definition
 const materials = {
-    0: { color: 0x000000 }, // Air (black, but it won't be rendered)
+    0: { color: 0x000000 }, // Air
     1: { color: 0x6cc66c }, // Grass
     2: { color: 0x997260 }, // Dirt
     3: { color: 0x888888 }, // Stone
@@ -803,10 +771,364 @@ const materials = {
     9: { color: 0xFFFFFF }  // Limestone
 };
 
-const CHUNK_LOADED = 2;
+// Initialize world systems
+export function initWorld() {
+    console.log("[World] Initializing world system...");
+    const SEED = Math.random() * 1000000;
+    console.log(`[World] Using seed: ${SEED}`);
 
-const featureNoise = new SimplexNoise(Math.random());
-const biomeNoise = new SimplexNoise(Math.random());
+    chunkWorker = new Worker(new URL('./chunksWorker.js', import.meta.url), {
+        type: 'module'
+    });
+    console.log("[World] Web Worker created");
+
+    chunkWorker.onmessage = function(e) {
+        if (e.data.type === 'init_complete') {
+            workerInitialized = true;
+            checkInitialization();
+            if (sceneReady) {
+                processChunkQueue();
+            }
+        } else if (e.data.type === 'chunk_data') {
+            const { chunkX, chunkZ, chunkData } = e.data;
+            const chunkKey = `${chunkX},${chunkZ}`;
+    
+            // Remove distance check here - trust the chunk management system
+            chunks[chunkKey] = new Int8Array(chunkData);
+            chunkStates[chunkKey] = CHUNK_LOADED;
+            
+            updateChunkGeometry(chunkX, chunkZ);
+            updateAdjacentChunks(chunkX, chunkZ);
+        }
+    };
+
+    console.log("[World] Sending worker init message");
+    chunkWorker.postMessage({
+        type: 'init',
+        seed: SEED
+    });
+}
+
+// Notify when scene is ready
+export function notifySceneReady() {
+    sceneReady = true;
+    console.log("[World] Scene ready:", sceneReady);
+    checkInitialization();
+}
+
+function checkInitialization() {
+    if (workerInitialized && sceneReady) {
+        initializationComplete = true;
+        console.log("[World] Full initialization complete");
+        // Start initial chunk processing
+        processChunkQueue();
+    }
+}
+
+function updateAdjacentChunks(chunkX, chunkZ) {
+    const neighbors = [
+        [chunkX + 1, chunkZ],
+        [chunkX - 1, chunkZ],
+        [chunkX, chunkZ + 1],
+        [chunkX, chunkZ - 1]
+    ];
+
+    neighbors.forEach(([x, z]) => {
+        const key = `${x},${z}`;
+        if (chunks[key] && chunkStates[key] === CHUNK_LOADED) {
+            updateChunkGeometry(x, z);
+        }
+    });
+}
+
+function addToLoadQueue(x, z) {
+    const chunkKey = `${x},${z}`;
+    const dx = x - currentPlayerChunkX;
+    const dz = z - currentPlayerChunkZ;
+    const buffer = RENDER_DISTANCE + 1;
+    
+    // Check rectangular boundaries
+    if (Math.abs(dx) > buffer || Math.abs(dz) > buffer) return;
+    
+    // Calculate distance squared for prioritization
+    const distanceSq = dx * dx + dz * dz;
+    
+    // Avoid duplicates
+    if (chunkLoadQueue.some(c => c.x === x && c.z === z)) return;
+    if (chunks[chunkKey] || chunkStates[chunkKey] === CHUNK_LOADING) return;
+
+    // Insert sorted by distance
+    const index = chunkLoadQueue.findIndex(c => {
+        const cDx = c.x - currentPlayerChunkX;
+        const cDz = c.z - currentPlayerChunkZ;
+        return distanceSq < (cDx * cDx + cDz * cDz);
+    });
+    
+    if (index === -1) {
+        chunkLoadQueue.push({ x, z, distanceSq });
+    } else {
+        chunkLoadQueue.splice(index, 0, { x, z, distanceSq });
+    }
+}
+
+function processChunkQueue() {
+    if (!workerInitialized || !sceneReady) return;
+
+    // Calculate time since last frame and adjust budget
+    const now = performance.now();
+    const timeSinceLastFrame = now - lastFrameTime;
+    lastFrameTime = now;
+
+    // Adjust frame budget based on actual frame time
+    if (timeSinceLastFrame < 16) {
+        frameBudget += 16 - timeSinceLastFrame; // We have extra time
+    } else {
+        frameBudget -= timeSinceLastFrame - 16; // We're running behind
+    }
+    
+    // Keep frame budget within reasonable bounds
+    frameBudget = Math.max(8, Math.min(32, frameBudget));
+
+    const startTime = performance.now();
+    let processed = 0;
+    
+    while (chunkLoadQueue.length > 0 && processed < MAX_CHUNKS_PER_FRAME) {
+        const { x, z } = chunkLoadQueue.shift();
+        const chunkKey = `${x},${z}`;
+        
+        if (!chunks[chunkKey] && chunkStates[chunkKey] !== CHUNK_LOADING) {
+            chunkStates[chunkKey] = CHUNK_LOADING;
+            chunkWorker.postMessage({ chunkX: x, chunkZ: z });
+            processed++;
+        }
+        
+        // Check if we've exceeded our frame budget
+        if (performance.now() - startTime > frameBudget) break;
+    }
+    
+    // If there are still chunks to process, schedule next frame
+    if (chunkLoadQueue.length > 0) {
+        requestAnimationFrame(processChunkQueue);
+    }
+}
+
+function getBlock(x, y, z) {
+    const chunkX = Math.floor(x / CHUNK_SIZE);
+    const chunkZ = Math.floor(z / CHUNK_SIZE);
+    const chunkKey = `${chunkX},${chunkZ}`;
+
+    if (!chunks[chunkKey]) {
+        if (chunkStates[chunkKey] !== CHUNK_LOADING) {
+            addToLoadQueue(chunkX, chunkZ, Infinity);
+        }
+        return 0;
+    }
+
+    const localX = ((x % CHUNK_SIZE) + CHUNK_SIZE) % CHUNK_SIZE;
+    const localZ = ((z % CHUNK_SIZE) + CHUNK_SIZE) % CHUNK_SIZE;
+
+    if (y < 0 || y >= CHUNK_HEIGHT) return 0;
+
+    return chunks[chunkKey][localX + localZ * CHUNK_SIZE + y * CHUNK_SIZE * CHUNK_SIZE] || 0;
+}
+
+function setBlock(x, y, z, type) {
+    const chunkX = Math.floor(x / CHUNK_SIZE);
+    const chunkZ = Math.floor(z / CHUNK_SIZE);
+    const chunkKey = `${chunkX},${chunkZ}`;
+
+    if (!chunks[chunkKey]) {
+        if (chunkStates[chunkKey] !== CHUNK_LOADING) {
+            addToLoadQueue(chunkX, chunkZ, Infinity);
+        }
+        return;
+    }
+
+    const localX = ((x % CHUNK_SIZE) + CHUNK_SIZE) % CHUNK_SIZE;
+    const localZ = ((z % CHUNK_SIZE) + CHUNK_SIZE) % CHUNK_SIZE;
+
+    if (y < 0 || y >= CHUNK_HEIGHT) return;
+
+    chunks[chunkKey][localX + localZ * CHUNK_SIZE + y * CHUNK_SIZE * CHUNK_SIZE] = type;
+    updateChunkGeometry(chunkX, chunkZ);
+}
+
+function updateBlock(x, y, z, newBlockType) {
+    const chunkX = Math.floor(x / CHUNK_SIZE);
+    const chunkZ = Math.floor(z / CHUNK_SIZE);
+    const localX = ((x % CHUNK_SIZE) + CHUNK_SIZE) % CHUNK_SIZE;
+    const localZ = ((z % CHUNK_SIZE) + CHUNK_SIZE) % CHUNK_SIZE;
+
+    const chunkKey = `${chunkX},${chunkZ}`;
+    if (!chunks[chunkKey]) {
+        if (chunkStates[chunkKey] !== CHUNK_LOADING) {
+            addToLoadQueue(chunkX, chunkZ, Infinity);
+        }
+        return;
+    }
+
+    const index = localX + localZ * CHUNK_SIZE + y * CHUNK_SIZE * CHUNK_SIZE;
+    chunks[chunkKey][index] = newBlockType;
+
+    updateChunkGeometry(chunkX, chunkZ);
+
+    if (localX === 0) updateChunkGeometry(chunkX - 1, chunkZ);
+    if (localX === CHUNK_SIZE - 1) updateChunkGeometry(chunkX + 1, chunkZ);
+    if (localZ === 0) updateChunkGeometry(chunkX, chunkZ - 1);
+    if (localZ === CHUNK_SIZE - 1) updateChunkGeometry(chunkX, chunkZ + 1);
+}
+
+function updateChunks(playerPosition) {
+    if (!playerPosition || !initializationComplete) return;
+
+    // Update player chunk position
+    currentPlayerChunkX = Math.floor(playerPosition.x / CHUNK_SIZE);
+    currentPlayerChunkZ = Math.floor(playerPosition.z / CHUNK_SIZE);
+
+    const chunksToKeep = new Set();
+    const buffer = RENDER_DISTANCE + 1;
+
+    // First pass: Collect all chunks in rectangular area
+    const chunksToCheck = [];
+    for (let dx = -buffer; dx <= buffer; dx++) {
+        for (let dz = -buffer; dz <= buffer; dz++) {
+            const x = currentPlayerChunkX + dx;
+            const z = currentPlayerChunkZ + dz;
+            chunksToCheck.push({ x, z });
+            chunksToKeep.add(`${x},${z}`);
+        }
+    }
+
+    // Sort chunks by distance to player
+    chunksToCheck.sort((a, b) => {
+        const aDx = a.x - currentPlayerChunkX;
+        const aDz = a.z - currentPlayerChunkZ;
+        const bDx = b.x - currentPlayerChunkX;
+        const bDz = b.z - currentPlayerChunkZ;
+        return (aDx * aDx + aDz * aDz) - (bDx * bDx + bDz * bDz);
+    });
+
+    // Add chunks to queue in sorted order
+    chunksToCheck.forEach(({ x, z }) => addToLoadQueue(x, z));
+
+    // Remove out-of-range chunks
+    Object.keys(chunkMeshes).forEach(chunkKey => {
+        if (!chunksToKeep.has(chunkKey)) {
+            const [x, z] = chunkKey.split(',').map(Number);
+            const dx = x - currentPlayerChunkX;
+            const dz = z - currentPlayerChunkZ;
+            
+            if (Math.abs(dx) > buffer || Math.abs(dz) > buffer) {
+                removeChunkGeometry(x, z);
+                cleanupChunkData(chunkKey);
+            }
+        }
+    });
+
+    processChunkQueue();
+}
+
+// New cleanup function in world.js
+function cleanupChunkData(chunkKey) {
+    // Cancel pending geometry generation
+    if (geometryQueue && geometryQueue.has(chunkKey)) {
+        geometryQueue.delete(chunkKey);
+    }
+
+    // Clear chunk data
+    delete chunks[chunkKey];
+    delete chunkStates[chunkKey];
+
+    // Clear block color cache
+    const [chunkX, chunkZ] = chunkKey.split(',').map(Number);
+    const startX = chunkX * CHUNK_SIZE;
+    const startZ = chunkZ * CHUNK_SIZE;
+
+    for (let x = startX; x < startX + CHUNK_SIZE; x++) {
+        for (let z = startZ; z < startZ + CHUNK_SIZE; z++) {
+            for (let y = 0; y < CHUNK_HEIGHT; y++) {
+                blockColors.delete(`${x},${y},${z}`);
+            }
+        }
+    }
+}
+
+function findSuitableSpawnPoint(chunkX, chunkZ) {
+    const chunkKey = `${chunkX},${chunkZ}`;
+    if (!chunks[chunkKey]) {
+        addToLoadQueue(chunkX, chunkZ, Infinity);
+        return { x: chunkX * CHUNK_SIZE + CHUNK_SIZE / 2, y: WATER_LEVEL + 2, z: chunkZ * CHUNK_SIZE + CHUNK_SIZE / 2 };
+    }
+
+    const centerX = Math.floor(CHUNK_SIZE / 2);
+    const centerZ = Math.floor(CHUNK_SIZE / 2);
+    let spawnY = 0;
+
+    for (let y = CHUNK_HEIGHT - 1; y >= 0; y--) {
+        if (chunks[chunkKey][centerX + centerZ * CHUNK_SIZE + y * CHUNK_SIZE * CHUNK_SIZE] !== 0) {
+            spawnY = y + 2;
+            break;
+        }
+    }
+
+    if (spawnY <= WATER_LEVEL) {
+        spawnY = WATER_LEVEL + 2;
+    }
+
+    return {
+        x: chunkX * CHUNK_SIZE + centerX,
+        y: spawnY,
+        z: chunkZ * CHUNK_SIZE + centerZ
+    };
+}
+
+export {
+    updateChunks,
+    setBlock,
+    getBlock,
+    chunks,
+    materials,
+    blockColors,
+    updateBlock,
+    findSuitableSpawnPoint,
+    addToLoadQueue,
+    initializationComplete,
+};
+
+================================================================================
+File: ./index.html
+================================================================================
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Webcraft</title>
+    <link rel="stylesheet" href="styles/main.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+</head>
+<body>
+    <div id="cursor"></div>
+    <div id="block-selector"></div>
+    <script type="module" src="scripts/utils.js"></script>
+    <script type="module" src="scripts/world.js"></script>
+    <script type="module" src="scripts/player.js"></script>
+    <script type="module" src="scripts/renderer.js"></script>
+    <script type="module" src="scripts/main.js"></script>
+</body>
+</html>
+
+================================================================================
+File: ./scripts/chunksWorker.js
+================================================================================
+
+import SimplexNoise from 'https://cdn.jsdelivr.net/npm/simplex-noise@3.0.0/+esm';
+
+const CHUNK_SIZE = 8;
+const CHUNK_HEIGHT = 100;
+const WATER_LEVEL = 24;
+const BEACH_LEVEL = WATER_LEVEL + 2;
 
 const BIOME_TYPES = {
     PLAINS: 0,
@@ -814,6 +1136,71 @@ const BIOME_TYPES = {
     DENSE_FOREST: 2,
     ROCKY: 3,
     BARREN: 4
+};
+
+// Create a seedable random generator
+function createPRNG(seed) {
+    return function() {
+        seed = (seed * 9301 + 49297) % 233280;
+        return seed / 233280;
+    };
+}
+
+let simplex;
+let featureNoise;
+let biomeNoise;
+let grassDirtNoise;
+
+self.onmessage = function(e) {
+    if (e.data.type === 'init') {
+        console.log("[Worker] Received init message");
+        const seed = e.data.seed;
+        // Initialize noise generators with the seed
+        simplex = new SimplexNoise({ 
+            random: createPRNG(seed)
+        });
+        featureNoise = new SimplexNoise({
+            random: createPRNG(seed + 1)
+        });
+        biomeNoise = new SimplexNoise({
+            random: createPRNG(seed + 2)
+        });
+        grassDirtNoise = new SimplexNoise({
+            random: createPRNG(seed + 3)
+        });
+        console.log("[Worker] Noise generators initialized");
+        // Notify main thread that initialization is complete
+        self.postMessage({ type: 'init_complete' });
+    } else {
+        const { chunkX, chunkZ } = e.data;
+        if (!simplex) {
+            console.error("[Worker] Noise generators not initialized!");
+            self.postMessage({ 
+                type: 'error',
+                message: "Noise generators not initialized",
+                chunkX,
+                chunkZ
+            });
+            return;
+        }
+        try {
+            const chunk = generateChunk(chunkX, chunkZ);
+            self.postMessage({
+                type: 'chunk_data',
+                chunkX,
+                chunkZ,
+                chunkData: chunk.buffer
+            }, [chunk.buffer]);
+        } catch (error) {
+            console.error(`[Worker] Error generating chunk (${chunkX},${chunkZ}):`, error);
+            self.postMessage({
+                type: 'error',
+                message: error.message,
+                chunkX,
+                chunkZ
+            });
+        }
+    }
 };
 
 function getBiomeAt(x, z) {
@@ -825,74 +1212,20 @@ function getBiomeAt(x, z) {
     return BIOME_TYPES.DENSE_FOREST;
 }
 
-function generateChunkFeatures(chunkX, chunkZ) {
-    const features = [];
-    const worldStartX = chunkX * CHUNK_SIZE;
-    const worldStartZ = chunkZ * CHUNK_SIZE;
-
-    // Iterate over the chunk in steps of 3 to reduce density
-    for (let x = 0; x < CHUNK_SIZE; x += 3) {
-        for (let z = 0; z < CHUNK_SIZE; z += 3) {
-            const worldX = worldStartX + x;
-            const worldZ = worldStartZ + z;
-
-            // Get the biome at this world position
-            const biome = getBiomeAt(worldX, worldZ);
-
-            // Determine the feature type based on biome and noise
-            const featureValue = featureNoise.noise2D(worldX * 0.05, worldZ * 0.05);
-            let featureType = null;
-
-            switch (biome) {
-                case BIOME_TYPES.DENSE_FOREST:
-                    if (featureValue > 0.3) featureType = 'smallTree';
-                    else if (featureValue > -0.3) featureType = 'bush';
-                    break;
-                case BIOME_TYPES.FOREST:
-                    if (featureValue > 0.8) featureType = 'largeTree';
-                    else if (featureValue > 0.2) featureType = 'smallTree';
-                    else if (featureValue > -0.2) featureType = 'bush';
-                    break;
-                case BIOME_TYPES.PLAINS:
-                    if (featureValue > 0.8) featureType = 'largeTree';
-                    else if (featureValue > 0.5) featureType = 'bush';
-                    break;
-                case BIOME_TYPES.ROCKY:
-                    if (featureValue > 0.7) featureType = 'largeRock';
-                    break;
-                case BIOME_TYPES.BARREN:
-                    if (featureValue > 0.9) featureType = 'largeRock';
-                    break;
-            }
-
-            // If a feature type was determined, add it to the features array
-            if (featureType) {
-                features.push({
-                    type: featureType,
-                    worldX: worldX, // Store world coordinates
-                    worldZ: worldZ,
-                });
-            }
-        }
-    }
-
-    return features;
-}
-
 function generateChunk(chunkX, chunkZ) {
     const chunk = new Int8Array(CHUNK_SIZE * CHUNK_SIZE * CHUNK_HEIGHT);
-
-    const grassDirtNoise = new SimplexNoise(Math.random());
 
     for (let x = 0; x < CHUNK_SIZE; x++) {
         for (let z = 0; z < CHUNK_SIZE; z++) {
             const worldX = chunkX * CHUNK_SIZE + x;
             const worldZ = chunkZ * CHUNK_SIZE + z;
 
+            // Get noise values from initialized generators
             const baseHeight = (simplex.noise2D(worldX * 0.0025, worldZ * 0.0025) + 1) * 0.8;
             const detailHeight = (simplex.noise2D(worldX * 0.01, worldZ * 0.01) + 1) * 0.5;
             const height = Math.floor((baseHeight * 0.8 + detailHeight * 0.2) * (CHUNK_HEIGHT - WATER_LEVEL)) + WATER_LEVEL - 20;
 
+            // Use 3D noise for vertical variations
             const slateNoise = simplex.noise3D(worldX * 0.025, 0, worldZ * 0.025);
             const limestoneNoise = simplex.noise3D(worldX * 0.025, 100, worldZ * 0.025);
 
@@ -914,10 +1247,10 @@ function generateChunk(chunkX, chunkZ) {
                         blockType = 2; // Dirt
                     } else {
                         if (y <= BEACH_LEVEL) {
-                            blockType = 4; // Sand for beaches
+                            blockType = 4; // Sand
                         } else {
                             const grassProbability = biome === BIOME_TYPES.BARREN ? 0.2 : 0.8;
-                            blockType = (grassDirtValue < grassProbability) ? 1 : 2; // Grass or dirt
+                            blockType = (grassDirtValue < grassProbability) ? 1 : 2;
                         }
                     }
                 } else if (y <= WATER_LEVEL) {
@@ -975,28 +1308,64 @@ function generateChunk(chunkX, chunkZ) {
         }
     });
 
+    console.log('[Chunk Worker] Chunk Generated');
+
 
     return chunk;
 }
 
-function getHeightAtWorld(worldX, worldZ) {
-    // Calculate height directly using noise instead of generating chunks
-    const baseHeight = (simplex.noise2D(worldX * 0.0025, worldZ * 0.0025) + 1) * 0.8;
-    const detailHeight = (simplex.noise2D(worldX * 0.01, worldZ * 0.01) + 1) * 0.5;
-    return Math.floor((baseHeight * 0.8 + detailHeight * 0.2) * (CHUNK_HEIGHT - WATER_LEVEL)) + WATER_LEVEL - 20;
-}
+function generateChunkFeatures(chunkX, chunkZ) {
+    const features = [];
+    const worldStartX = chunkX * CHUNK_SIZE;
+    const worldStartZ = chunkZ * CHUNK_SIZE;
 
+    // Iterate over the chunk in steps of 3 to reduce density
+    for (let x = 0; x < CHUNK_SIZE; x += 3) {
+        for (let z = 0; z < CHUNK_SIZE; z += 3) {
+            const worldX = worldStartX + x;
+            const worldZ = worldStartZ + z;
 
-function getHeightAt(chunk, x, z) {
-    if (x < 0 || x >= CHUNK_SIZE || z < 0 || z >= CHUNK_SIZE) {
-        return WATER_LEVEL;
-    }
-    for (let y = CHUNK_HEIGHT - 1; y >= 0; y--) {
-        if (chunk[x + z * CHUNK_SIZE + y * CHUNK_SIZE * CHUNK_SIZE] !== 0) {
-            return y;
+            // Get the biome at this world position
+            const biome = getBiomeAt(worldX, worldZ);
+
+            // Determine the feature type based on biome and noise
+            const featureValue = featureNoise.noise2D(worldX * 0.05, worldZ * 0.05);
+            let featureType = null;
+
+            switch (biome) {
+                case BIOME_TYPES.DENSE_FOREST:
+                    if (featureValue > 0.3) featureType = 'smallTree';
+                    else if (featureValue > -0.3) featureType = 'bush';
+                    break;
+                case BIOME_TYPES.FOREST:
+                    if (featureValue > 0.8) featureType = 'largeTree';
+                    else if (featureValue > 0.2) featureType = 'smallTree';
+                    else if (featureValue > -0.2) featureType = 'bush';
+                    break;
+                case BIOME_TYPES.PLAINS:
+                    if (featureValue > 0.8) featureType = 'largeTree';
+                    else if (featureValue > 0.5) featureType = 'bush';
+                    break;
+                case BIOME_TYPES.ROCKY:
+                    if (featureValue > 0.7) featureType = 'largeRock';
+                    break;
+                case BIOME_TYPES.BARREN:
+                    if (featureValue > 0.9) featureType = 'largeRock';
+                    break;
+            }
+
+            // If a feature type was determined, add it to the features array
+            if (featureType) {
+                features.push({
+                    type: featureType,
+                    worldX: worldX, // Store world coordinates
+                    worldZ: worldZ,
+                });
+            }
         }
     }
-    return 0;
+
+    return features;
 }
 
 function generateLargeTree(chunk, chunkX, chunkZ, worldX, worldZ, baseHeight) {
@@ -1052,15 +1421,50 @@ function generateLargeTree(chunk, chunkX, chunkZ, worldX, worldZ, baseHeight) {
     }
 }
 
-function setBlockIfInChunk(chunk, chunkX, chunkZ, worldX, worldZ, y, type, density = 1.0) {
-    if (y < 0 || y >= CHUNK_HEIGHT) return;
-    if (Math.random() > density) return;
+function generateBush(chunk, chunkX, chunkZ, worldX, worldZ, baseHeight) {
+    const bushSize = Math.floor(Math.random() * 2) + 2;
 
-    const localX = worldX - chunkX * CHUNK_SIZE;
-    const localZ = worldZ - chunkZ * CHUNK_SIZE;
+    for (let y = baseHeight; y < baseHeight + bushSize && y < CHUNK_HEIGHT; y++) {
+        for (let dx = -1; dx <= 1; dx++) {
+            for (let dz = -1; dz <= 1; dz++) {
+                if (Math.random() < 0.7) {
+                    setBlockIfInChunk(
+                        chunk,
+                        chunkX,
+                        chunkZ,
+                        worldX + dx,
+                        worldZ + dz,
+                        y,
+                        7 // Leaves
+                    );
+                }
+            }
+        }
+    }
+}
 
-    if (localX >= 0 && localX < CHUNK_SIZE && localZ >= 0 && localZ < CHUNK_SIZE) {
-        chunk[localX + localZ * CHUNK_SIZE + y * CHUNK_SIZE * CHUNK_SIZE] = type;
+function generateLargeRockFormation(chunk, chunkX, chunkZ, worldX, worldZ, baseHeight) {
+    const rockHeight = Math.floor(Math.random() * 4) + 2;
+    const rockRadius = Math.floor(rockHeight * 0.7) + 1;
+    const rockType = Math.random() < 0.5 ? 3 : 8; // Stone or Slate
+
+    for (let y = baseHeight; y < baseHeight + rockHeight && y < CHUNK_HEIGHT; y++) {
+        const layerRadius = Math.max(1, rockRadius - Math.floor((y - baseHeight) / 2));
+        for (let dx = -layerRadius; dx <= layerRadius; dx++) {
+            for (let dz = -layerRadius; dz <= layerRadius; dz++) {
+                if (dx * dx + dz * dz <= layerRadius * layerRadius * (0.7 + Math.random() * 0.3)) {
+                    setBlockIfInChunk(
+                        chunk,
+                        chunkX,
+                        chunkZ,
+                        worldX + dx,
+                        worldZ + dz,
+                        y,
+                        rockType
+                    );
+                }
+            }
+        }
     }
 }
 
@@ -1103,7 +1507,6 @@ function generateSmallTree(chunk, chunkX, chunkZ, worldX, worldZ, baseHeight) {
     }
 }
 
-// Helper function to get a block from the chunk
 function getBlockInChunk(chunk, x, y, z) {
     if (x >= 0 && x < CHUNK_SIZE && z >= 0 && z < CHUNK_SIZE && y >= 0 && y < CHUNK_HEIGHT) {
         return chunk[x + z * CHUNK_SIZE + y * CHUNK_SIZE * CHUNK_SIZE];
@@ -1111,289 +1514,25 @@ function getBlockInChunk(chunk, x, y, z) {
     return 0; // Return air for out-of-bounds blocks
 }
 
-function generateLargeRockFormation(chunk, chunkX, chunkZ, worldX, worldZ, baseHeight) {
-    const rockHeight = Math.floor(Math.random() * 4) + 2;
-    const rockRadius = Math.floor(rockHeight * 0.7) + 1;
-    const rockType = Math.random() < 0.5 ? 3 : 8; // Stone or Slate
+function getHeightAtWorld(worldX, worldZ) {
+    // Calculate height directly using noise instead of generating chunks
+    const baseHeight = (simplex.noise2D(worldX * 0.0025, worldZ * 0.0025) + 1) * 0.8;
+    const detailHeight = (simplex.noise2D(worldX * 0.01, worldZ * 0.01) + 1) * 0.5;
+    return Math.floor((baseHeight * 0.8 + detailHeight * 0.2) * (CHUNK_HEIGHT - WATER_LEVEL)) + WATER_LEVEL - 20;
+}
 
-    for (let y = baseHeight; y < baseHeight + rockHeight && y < CHUNK_HEIGHT; y++) {
-        const layerRadius = Math.max(1, rockRadius - Math.floor((y - baseHeight) / 2));
-        for (let dx = -layerRadius; dx <= layerRadius; dx++) {
-            for (let dz = -layerRadius; dz <= layerRadius; dz++) {
-                if (dx * dx + dz * dz <= layerRadius * layerRadius * (0.7 + Math.random() * 0.3)) {
-                    setBlockIfInChunk(
-                        chunk,
-                        chunkX,
-                        chunkZ,
-                        worldX + dx,
-                        worldZ + dz,
-                        y,
-                        rockType
-                    );
-                }
-            }
-        }
+function setBlockIfInChunk(chunk, chunkX, chunkZ, worldX, worldZ, y, type, density = 1.0) {
+    if (y < 0 || y >= CHUNK_HEIGHT) return;
+    if (Math.random() > density) return;
+
+    const localX = worldX - chunkX * CHUNK_SIZE;
+    const localZ = worldZ - chunkZ * CHUNK_SIZE;
+
+    if (localX >= 0 && localX < CHUNK_SIZE && localZ >= 0 && localZ < CHUNK_SIZE) {
+        chunk[localX + localZ * CHUNK_SIZE + y * CHUNK_SIZE * CHUNK_SIZE] = type;
     }
 }
 
-function generateBush(chunk, chunkX, chunkZ, worldX, worldZ, baseHeight) {
-    const bushSize = Math.floor(Math.random() * 2) + 2;
-
-    for (let y = baseHeight; y < baseHeight + bushSize && y < CHUNK_HEIGHT; y++) {
-        for (let dx = -1; dx <= 1; dx++) {
-            for (let dz = -1; dz <= 1; dz++) {
-                if (Math.random() < 0.7) {
-                    setBlockIfInChunk(
-                        chunk,
-                        chunkX,
-                        chunkZ,
-                        worldX + dx,
-                        worldZ + dz,
-                        y,
-                        7 // Leaves
-                    );
-                }
-            }
-        }
-    }
+export {
+    generateChunk,
 }
-
-function setBlockInChunk(chunk, x, y, z, blockType) {
-    if (x >= 0 && x < CHUNK_SIZE && z >= 0 && z < CHUNK_SIZE && y >= 0 && y < CHUNK_HEIGHT) {
-        chunk[x + z * CHUNK_SIZE + y * CHUNK_SIZE * CHUNK_SIZE] = blockType;
-    }
-}
-
-function getBlock(x, y, z) {
-    const chunkX = Math.floor(x / CHUNK_SIZE);
-    const chunkZ = Math.floor(z / CHUNK_SIZE);
-    const chunkKey = `${chunkX},${chunkZ}`;
-
-    if (!chunks[chunkKey]) {
-        chunks[chunkKey] = generateChunk(chunkX, chunkZ);
-    }
-
-    const localX = ((x % CHUNK_SIZE) + CHUNK_SIZE) % CHUNK_SIZE;
-    const localZ = ((z % CHUNK_SIZE) + CHUNK_SIZE) % CHUNK_SIZE;
-
-    if (y < 0 || y >= CHUNK_HEIGHT) return 0; // Air outside vertical bounds
-
-    return chunks[chunkKey][localX + localZ * CHUNK_SIZE + y * CHUNK_SIZE * CHUNK_SIZE] || 0;
-}
-
-function setBlock(x, y, z, type) {
-    const chunkX = Math.floor(x / CHUNK_SIZE);
-    const chunkZ = Math.floor(z / CHUNK_SIZE);
-    const chunkKey = `${chunkX},${chunkZ}`;
-
-    if (!chunks[chunkKey]) {
-        chunks[chunkKey] = generateChunk(chunkX, chunkZ);
-    }
-
-    const localX = ((x % CHUNK_SIZE) + CHUNK_SIZE) % CHUNK_SIZE;
-    const localZ = ((z % CHUNK_SIZE) + CHUNK_SIZE) % CHUNK_SIZE;
-
-    if (y < 0 || y >= CHUNK_HEIGHT) return; // Don't set blocks outside vertical bounds
-
-    chunks[chunkKey][localX + localZ * CHUNK_SIZE + y * CHUNK_SIZE * CHUNK_SIZE] = type;
-    updateChunkGeometry(chunkX, chunkZ);
-}
-
-function updateBlock(x, y, z, newBlockType) {
-    const chunkX = Math.floor(x / CHUNK_SIZE);
-    const chunkZ = Math.floor(z / CHUNK_SIZE);
-    const localX = ((x % CHUNK_SIZE) + CHUNK_SIZE) % CHUNK_SIZE;
-    const localZ = ((z % CHUNK_SIZE) + CHUNK_SIZE) % CHUNK_SIZE;
-
-    const chunkKey = `${chunkX},${chunkZ}`;
-    if (!chunks[chunkKey]) {
-        chunks[chunkKey] = generateChunk(chunkX, chunkZ);
-    }
-    const index = localX + localZ * CHUNK_SIZE + y * CHUNK_SIZE * CHUNK_SIZE;
-    chunks[chunkKey][index] = newBlockType;
-
-    updateChunkGeometry(chunkX, chunkZ);
-
-    if (localX === 0) updateChunkGeometry(chunkX - 1, chunkZ);
-    if (localX === CHUNK_SIZE - 1) updateChunkGeometry(chunkX + 1, chunkZ);
-    if (localZ === 0) updateChunkGeometry(chunkX, chunkZ - 1);
-    if (localZ === CHUNK_SIZE - 1) updateChunkGeometry(chunkX, chunkZ + 1);
-}
-
-function addToLoadQueue(x, z, priority) {
-    chunkLoadQueue.push({ x, z, priority });
-    chunkLoadQueue.sort((a, b) => b.priority - a.priority);
-}
-
-function processChunkQueue() {
-    const frameStart = performance.now();
-    const timeSinceLastFrame = frameStart - lastFrameTime;
-    lastFrameTime = frameStart;
-
-    // Adjust frame budget based on FPS
-    if (timeSinceLastFrame < 16) {
-        frameBudget += 16 - timeSinceLastFrame; // We have extra time
-    } else {
-        frameBudget -= timeSinceLastFrame - 16; // We're behind
-    }
-    frameBudget = Math.max(8, Math.min(32, frameBudget)); // Clamp between 8ms and 32ms
-
-    let processedChunks = 0;
-    const startTime = performance.now();
-
-    while (chunkLoadQueue.length > 0 && processedChunks < MAX_CHUNKS_PER_FRAME) {
-        const { x, z } = chunkLoadQueue.shift();
-        const chunkKey = `${x},${z}`;
-
-        if (!chunks[chunkKey]) {
-            chunks[chunkKey] = generateChunk(x, z);
-            chunkStates[chunkKey] = CHUNK_LOADED;
-            updateChunkGeometry(x, z);
-            processedChunks++;
-        }
-
-        // Check if we've exceeded the frame budget
-        if (performance.now() - startTime > frameBudget) {
-            break;
-        }
-    }
-
-    // If there are still chunks to process, schedule the next frame
-    if (chunkLoadQueue.length > 0) {
-        requestAnimationFrame(processChunkQueue);
-    }
-}
-
-function updateChunks(scene, playerPosition) {
-    if (!playerPosition) return;
-
-    frameCounter++;
-    const playerChunkX = Math.floor(playerPosition.x / CHUNK_SIZE);
-    const playerChunkZ = Math.floor(playerPosition.z / CHUNK_SIZE);
-
-    // Set to keep track of chunks that should be loaded
-    const chunksToKeep = new Set();
-
-    // Spiral loading logic
-    const spiralOrder = [];
-    for (let d = 0; d <= RENDER_DISTANCE; d++) {
-        for (let x = -d; x <= d; x++) {
-            for (let z = -d; z <= d; z++) {
-                if (Math.abs(x) === d || Math.abs(z) === d) {
-                    const distance = Math.sqrt(x * x + z * z);
-                    const priority = 1 / (distance + 1); // Higher priority for closer chunks
-                    spiralOrder.push({ x: playerChunkX + x, z: playerChunkZ + z, priority });
-                }
-            }
-        }
-    }
-
-    // Add chunks to load queue in spiral order
-    spiralOrder.forEach(({ x, z, priority }) => {
-        const chunkKey = `${x},${z}`;
-        chunksToKeep.add(chunkKey);
-
-        if (!chunks[chunkKey]) {
-            addToLoadQueue(x, z, priority);
-        } else if (!chunkMeshes[chunkKey]) {
-            if (!chunkUpdateQueue.includes(chunkKey)) {
-                chunkUpdateQueue.push(chunkKey);
-            }
-        }
-    });
-
-    // Queue chunks for removal if they're out of render distance
-    for (const chunkKey in chunkMeshes) {
-        if (!chunksToKeep.has(chunkKey) && !chunkRemovalQueue.includes(chunkKey)) {
-            chunkRemovalQueue.push(chunkKey);
-        }
-    }
-
-    // Update one chunk per frame
-    if (chunkUpdateQueue.length > 0) {
-        const chunkKey = chunkUpdateQueue.shift();
-        const [x, z] = chunkKey.split(',').map(Number);
-        updateChunkGeometry(x, z, scene);
-    }
-
-    // Remove up to two chunks per frame
-    for (let i = 0; i < 2 && chunkRemovalQueue.length > 0; i++) {
-        const chunkKey = chunkRemovalQueue.shift();
-        const [x, z] = chunkKey.split(',').map(Number);
-        scene.remove(chunkMeshes[chunkKey].solid);
-        scene.remove(chunkMeshes[chunkKey].water);
-        chunkMeshes[chunkKey].solid.geometry.dispose();
-        chunkMeshes[chunkKey].water.geometry.dispose();
-        delete chunkMeshes[chunkKey];
-        delete chunks[chunkKey];
-        delete chunkStates[chunkKey];
-
-        // Remove block colors for this chunk
-        for (let localX = 0; localX < CHUNK_SIZE; localX++) {
-            for (let localZ = 0; localZ < CHUNK_SIZE; localZ++) {
-                for (let y = 0; y < CHUNK_HEIGHT; y++) {
-                    const worldX = x * CHUNK_SIZE + localX;
-                    const worldZ = z * CHUNK_SIZE + localZ;
-                    blockColors.delete(`${worldX},${y},${worldZ}`);
-                }
-            }
-        }
-    }
-
-    // Process chunk queue dynamically
-    processChunkQueue();
-}
-
-function findSuitableSpawnPoint(chunkX, chunkZ) {
-    const chunk = generateChunk(chunkX, chunkZ);
-    const centerX = Math.floor(CHUNK_SIZE / 2);
-    const centerZ = Math.floor(CHUNK_SIZE / 2);
-
-    let spawnY = getHeightAt(chunk, centerX, centerZ);
-
-    // Ensure the spawn point is above water level and not too high
-    if (spawnY <= WATER_LEVEL) {
-        spawnY = WATER_LEVEL + 1;
-    } else if (spawnY >= CHUNK_HEIGHT - 10) {
-        spawnY = CHUNK_HEIGHT - 10;
-    }
-
-    // Add a little elevation to ensure the player spawns above ground
-    spawnY += 2;
-
-    return {
-        x: chunkX * CHUNK_SIZE + centerX,
-        y: spawnY,
-        z: chunkZ * CHUNK_SIZE + centerZ
-    };
-}
-
-export { generateChunk, updateChunks, setBlock, getBlock, chunks, materials, blockColors, updateBlock, findSuitableSpawnPoint };
-
-
-================================================================================
-File: ./index.html
-================================================================================
-
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Webcraft</title>
-    <link rel="stylesheet" href="styles/main.css">
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/simplex-noise/2.4.0/simplex-noise.min.js"></script>
-</head>
-<body>
-    <div id="cursor"></div>
-    <div id="block-selector"></div>
-    <script type="module" src="scripts/utils.js"></script>
-    <script type="module" src="scripts/world.js"></script>
-    <script type="module" src="scripts/player.js"></script>
-    <script type="module" src="scripts/renderer.js"></script>
-    <script type="module" src="scripts/main.js"></script>
-    
-</body>
-</html>
-

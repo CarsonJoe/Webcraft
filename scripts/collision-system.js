@@ -24,6 +24,7 @@ export function checkCollision(entity, deltaTime) {
     };
 
     ['x', 'y', 'z'].forEach(axis => {
+        if (Math.abs(velocity[axis]) < 0.0001) return;
         let minCollision = Infinity;
         let maxCollision = -Infinity;
 
