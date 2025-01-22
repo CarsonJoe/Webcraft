@@ -313,14 +313,31 @@ const Player = (function () {
     }
 
     function checkCollision(x, y, z) {
-        return COLLISION_OFFSETS.some(([dx, dy, dz]) => {
-            const blockType = getBlockGlobal(
-                x + dx, 
-                y + dy, 
-                z + dz
-            );
-            return blockType !== 0 && blockType !== 5; // Not air or water
-        });
+        const minX = x - HALF_WIDTH;
+        const maxX = x + HALF_WIDTH;
+        const minY = y;
+        const maxY = y + PLAYER_HEIGHT;
+        const minZ = z - HALF_WIDTH;
+        const maxZ = z + HALF_WIDTH;
+    
+        const startX = Math.floor(minX);
+        const endX = Math.floor(maxX);
+        const startY = Math.floor(minY);
+        const endY = Math.floor(maxY);
+        const startZ = Math.floor(minZ);
+        const endZ = Math.floor(maxZ);
+    
+        for (let bx = startX; bx <= endX; bx++) {
+            for (let bz = startZ; bz <= endZ; bz++) {
+                for (let by = startY; by <= endY; by++) {
+                    const blockType = getBlockGlobal(bx, by, bz);
+                    if (blockType !== 0 && blockType !== 5) {
+                        return true; // Collision detected
+                    }
+                }
+            }
+        }
+        return false; // No collision
     }
 
     function checkWaterCollision(x, y, z) {
@@ -337,24 +354,27 @@ const Player = (function () {
     }
 
     function getBlockGlobal(x, y, z) {
-        const chunkX = Math.floor(x / CHUNK_SIZE);
-        const chunkZ = Math.floor(z / CHUNK_SIZE);
+        // Floor the coordinates to get integer block positions
+        const blockX = Math.floor(x);
+        const blockY = Math.floor(y);
+        const blockZ = Math.floor(z);
+    
+        const chunkX = Math.floor(blockX / CHUNK_SIZE);
+        const chunkZ = Math.floor(blockZ / CHUNK_SIZE);
         const chunkKey = `${chunkX},${chunkZ}`;
-
-        // Request chunk generation if missing
+    
         if (!chunks[chunkKey]) {
-            // Add to load queue instead of generating directly
             addToLoadQueue(chunkX, chunkZ, Infinity);
-            return 0; // Temporarily return air until chunk loads
+            return 0;
         }
-
-        const localX = Math.floor(((x % CHUNK_SIZE) + CHUNK_SIZE) % CHUNK_SIZE);
-        const localZ = Math.floor(((z % CHUNK_SIZE) + CHUNK_SIZE) % CHUNK_SIZE);
-        const localY = Math.floor(y);
-
-        if (localY < 0) return 1;
-        if (localY >= CHUNK_HEIGHT) return 0;
-
+    
+        const localX = ((blockX % CHUNK_SIZE) + CHUNK_SIZE) % CHUNK_SIZE;
+        const localZ = ((blockZ % CHUNK_SIZE) + CHUNK_SIZE) % CHUNK_SIZE;
+        const localY = blockY;
+    
+        if (localY < 0) return 1; // Bedrock at bottom
+        if (localY >= CHUNK_HEIGHT) return 0; // Air above max height
+    
         return chunks[chunkKey][localX + localZ * CHUNK_SIZE + localY * CHUNK_SIZE * CHUNK_SIZE] || 0;
     }
 

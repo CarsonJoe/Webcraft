@@ -10,17 +10,14 @@ export function checkCollision(entity, deltaTime) {
     const { width, height, depth } = hitbox;
 
     const newPosition = new THREE.Vector3().addVectors(position, velocity.clone().multiplyScalar(deltaTime));
-
-    const corners = [
-        new THREE.Vector3(-width/2, 0, -depth/2),
-        new THREE.Vector3(width/2, 0, -depth/2),
-        new THREE.Vector3(-width/2, 0, depth/2),
-        new THREE.Vector3(width/2, 0, depth/2),
-        new THREE.Vector3(-width/2, height, -depth/2),
-        new THREE.Vector3(width/2, height, -depth/2),
-        new THREE.Vector3(-width/2, height, depth/2),
-        new THREE.Vector3(width/2, height, depth/2)
-    ];
+    
+    // Calculate hitbox bounds
+    const minX = newPosition.x - width / 2;
+    const maxX = newPosition.x + width / 2;
+    const minY = newPosition.y;
+    const maxY = newPosition.y + height;
+    const minZ = newPosition.z - depth / 2;
+    const maxZ = newPosition.z + depth / 2;
 
     const collisionInfo = {
         collided: false,
@@ -28,51 +25,38 @@ export function checkCollision(entity, deltaTime) {
         newPosition: newPosition.clone()
     };
 
-    ['x', 'y', 'z'].forEach(axis => {
-        if (Math.abs(velocity[axis]) < 0.0001) return;
-        let minCollision = Infinity;
-        let maxCollision = -Infinity;
+    // Check all blocks within the hitbox bounds
+    let collided = false;
+    for (let x = Math.floor(minX); x <= Math.floor(maxX); x++) {
+        for (let y = Math.floor(minY); y <= Math.floor(maxY); y++) {
+            for (let z = Math.floor(minZ); z <= Math.floor(maxZ); z++) {
+                const block = getBlock(x, y, z);
+                if (block !== 0 && block !== 5) {
+                    // Calculate overlap for each axis
+                    const overlapX = Math.min(maxX - x, (x + 1) - minX);
+                    const overlapY = Math.min(maxY - y, (y + 1) - minY);
+                    const overlapZ = Math.min(maxZ - z, (z + 1) - minZ);
 
-        corners.forEach(corner => {
-            const worldPos = new THREE.Vector3().addVectors(newPosition, corner);
-            const blockPos = worldPos.clone().floor();
-
-            for (let dx = -1; dx <= 1; dx++) {
-                for (let dy = -1; dy <= 1; dy++) {
-                    for (let dz = -1; dz <= 1; dz++) {
-                        const checkPos = blockPos.clone().add(new THREE.Vector3(dx, dy, dz));
-                        const block = getBlock(checkPos.x, checkPos.y, checkPos.z);
-
-                        if (block !== 0 && block !== 5) { // Not air and not water
-                            const blockBox = new THREE.Box3(checkPos, checkPos.clone().add(new THREE.Vector3(1, 1, 1)));
-                            const intersection = blockBox[axis] - worldPos[axis];
-
-                            if (velocity[axis] > 0) {
-                                minCollision = Math.min(minCollision, intersection);
-                            } else if (velocity[axis] < 0) {
-                                maxCollision = Math.max(maxCollision, intersection + 1);
-                            }
+                    // Find the smallest overlap to determine collision direction
+                    const minOverlap = Math.min(overlapX, overlapY, overlapZ);
+                    
+                    if (minOverlap > 0) {
+                        collided = true;
+                        // Adjust position based on collision direction
+                        if (minOverlap === overlapX) {
+                            collisionInfo.newPosition.x += velocity.x > 0 ? -overlapX : overlapX;
+                        } else if (minOverlap === overlapY) {
+                            collisionInfo.newPosition.y += velocity.y > 0 ? -overlapY : overlapY;
+                            if (velocity.y < 0) collisionInfo.onGround = true;
+                        } else {
+                            collisionInfo.newPosition.z += velocity.z > 0 ? -overlapZ : overlapZ;
                         }
+                        collisionInfo.collided = true;
                     }
                 }
             }
-        });
-
-        if (minCollision < Infinity) {
-            collisionInfo.newPosition[axis] = newPosition[axis] + minCollision - 0.001;
-            collisionInfo.collided = true;
-            if (axis === 'y') collisionInfo.onGround = true;
-        } else if (maxCollision > -Infinity) {
-            collisionInfo.newPosition[axis] = newPosition[axis] + maxCollision + 0.001;
-            collisionInfo.collided = true;
-            if (axis === 'y') collisionInfo.onGround = true;
         }
-    });
-
-    // Add debug logging
-    console.log('Collision Info:', collisionInfo);
-    console.log('Player Position:', position);
-    console.log('Player Velocity:', velocity);
+    }
 
     return collisionInfo;
 }
@@ -185,6 +169,21 @@ const Player = (function () {
     const WATER_GRAVITY = 4; // Units per second squared
     const PLAYER_WIDTH = 1.2;
     const PLAYER_HEIGHT = 3.6;
+    const HALF_WIDTH = PLAYER_WIDTH / 2;
+    const HALF_DEPTH = HALF_WIDTH; // Assuming square base
+    const COLLISION_OFFSETS = [
+        // Lower layer (y = 0)
+        [-HALF_WIDTH, 0, -HALF_DEPTH],
+        [HALF_WIDTH, 0, -HALF_DEPTH],
+        [-HALF_WIDTH, 0, HALF_DEPTH],
+        [HALF_WIDTH, 0, HALF_DEPTH],
+        
+        // Upper layer (y = PLAYER_HEIGHT)
+        [-HALF_WIDTH, PLAYER_HEIGHT, -HALF_DEPTH],
+        [HALF_WIDTH, PLAYER_HEIGHT, -HALF_DEPTH],
+        [-HALF_WIDTH, PLAYER_HEIGHT, HALF_DEPTH],
+        [HALF_WIDTH, PLAYER_HEIGHT, HALF_DEPTH]
+    ];
     const EYE_HEIGHT = 3.2;
     const STEP_HEIGHT = 1.0; // Maximum height of a step the player can automatically climb
 
@@ -469,24 +468,14 @@ const Player = (function () {
     }
 
     function checkCollision(x, y, z) {
-        const positions = [
-            [x - PLAYER_WIDTH / 2, y, z - PLAYER_WIDTH / 2],
-            [x + PLAYER_WIDTH / 2, y, z - PLAYER_WIDTH / 2],
-            [x - PLAYER_WIDTH / 2, y, z + PLAYER_WIDTH / 2],
-            [x + PLAYER_WIDTH / 2, y, z + PLAYER_WIDTH / 2],
-            [x - PLAYER_WIDTH / 2, y + PLAYER_HEIGHT, z - PLAYER_WIDTH / 2],
-            [x + PLAYER_WIDTH / 2, y + PLAYER_HEIGHT, z - PLAYER_WIDTH / 2],
-            [x - PLAYER_WIDTH / 2, y + PLAYER_HEIGHT, z + PLAYER_WIDTH / 2],
-            [x + PLAYER_WIDTH / 2, y + PLAYER_HEIGHT, z + PLAYER_WIDTH / 2]
-        ];
-
-        for (const [px, py, pz] of positions) {
-            const blockType = getBlockGlobal(px, py, pz);
-            if (blockType !== 0 && blockType !== 5) { // Not air and not water
-                return true;
-            }
-        }
-        return false;
+        return COLLISION_OFFSETS.some(([dx, dy, dz]) => {
+            const blockType = getBlockGlobal(
+                x + dx, 
+                y + dy, 
+                z + dz
+            );
+            return blockType !== 0 && blockType !== 5; // Not air or water
+        });
     }
 
     function checkWaterCollision(x, y, z) {
@@ -552,7 +541,7 @@ let frameCount = 0;
 let lastTime = performance.now();
 
 export function initRenderer(scn, cam) {
-    scene = scn; // Ensure scene reference is updated
+    scene = scn;
     camera = cam;
     
     renderer = new THREE.WebGLRenderer({
@@ -560,10 +549,8 @@ export function initRenderer(scn, cam) {
         powerPreference: "high-performance"
     });
     
-    // Enable shadow maps
     renderer.shadowMap.enabled = true;
     renderer.shadowMap.type = THREE.PCFSoftShadowMap;
-    renderer = new THREE.WebGLRenderer({ antialias: false });
     renderer.setSize(window.innerWidth, window.innerHeight);
     document.body.appendChild(renderer.domElement);
     
@@ -1850,17 +1837,11 @@ function generateGeometry(chunkX, chunkZ, chunkData, adjacentChunks) {
             for (let z = 0; z < CHUNK_SIZE; z++) {
                 const blockType = chunkData[x + z * CHUNK_SIZE + y * CHUNK_SIZE * CHUNK_SIZE];
                 if (blockType === 0) continue;
-                const isWater = blockType === 5;
 
+                // Get neighbor information first
                 const worldX = chunkX * CHUNK_SIZE + x;
                 const worldZ = chunkZ * CHUNK_SIZE + z;
-                const baseColor = hexToRGB(materials[blockType].color);
-                const colorMultipliers = getBlockVariation(worldX, y, worldZ, blockType);
-                const finalColor = baseColor.map((c, i) => 
-                    Math.min(1, Math.max(0, c * colorMultipliers[i]))
-                );
-
-                // Check neighbors using adjacent chunks
+                
                 const neighbors = {
                     px: getBlockInWorld(chunkX, chunkZ, x + 1, y, z, chunkData, adjacentChunks),
                     nx: getBlockInWorld(chunkX, chunkZ, x - 1, y, z, chunkData, adjacentChunks),
@@ -1870,7 +1851,28 @@ function generateGeometry(chunkX, chunkZ, chunkData, adjacentChunks) {
                     nz: getBlockInWorld(chunkX, chunkZ, x, y, z - 1, chunkData, adjacentChunks)
                 };
 
-                // Generate faces only if neighbor is air (for water) or transparent (for solids)
+                // Skip processing completely enclosed solid blocks
+                if (x > 0 && x < CHUNK_SIZE - 1 && 
+                    z > 0 && z < CHUNK_SIZE - 1 &&
+                    y > 0 && y < CHUNK_HEIGHT - 1) {
+                    if (!isTransparent(neighbors.px) && 
+                        !isTransparent(neighbors.nx) &&
+                        !isTransparent(neighbors.py) && 
+                        !isTransparent(neighbors.ny) &&
+                        !isTransparent(neighbors.pz) && 
+                        !isTransparent(neighbors.nz)) {
+                        continue;
+                    }
+                }
+
+                const isWater = blockType === 5;
+                const baseColor = hexToRGB(materials[blockType].color);
+                const colorMultipliers = getBlockVariation(worldX, y, worldZ, blockType);
+                const finalColor = baseColor.map((c, i) => 
+                    Math.min(1, Math.max(0, c * colorMultipliers[i]))
+                );
+
+                // Generate faces only if neighbor is transparent
                 if ((isWater && neighbors.px === 0) || (!isWater && isTransparent(neighbors.px)))
                     addFace(isWater, [1, 0, 0], x + 1, y, z, finalColor);
                 if ((isWater && neighbors.nx === 0) || (!isWater && isTransparent(neighbors.nx)))
