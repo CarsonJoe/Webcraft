@@ -1,5 +1,5 @@
 import { CHUNK_HEIGHT, CHUNK_SIZE } from './constants.js';
-import { getBlock, updateBlock, chunks, addToLoadQueue } from "./world.js";
+import { getBlock, updateBlock, chunks, addToLoadQueue, spawnPoint } from "./world.js";
 import { updateBlockSelector } from "./utils.js";
 import { chunkMeshes } from "./renderer.js";
 
@@ -19,6 +19,7 @@ const Player = (function () {
 
 
     // Player state
+    let isFlying = false;
     let isSprinting = false;
     let isSwimming = false;
     let velocity = new THREE.Vector3();
@@ -41,12 +42,18 @@ const Player = (function () {
         pitchObject.add(camera);
 
         yawObject = new THREE.Object3D();
-        yawObject.position.y = 200; // Initial spawn height
+
+        // Set initial position to spawn point with Y above terrain
+        yawObject.position.set(
+            spawnPoint.x,
+            CHUNK_HEIGHT, // Set Y to maximum chunk height
+            spawnPoint.z
+        );
+
         yawObject.add(pitchObject);
         scene.add(yawObject);
 
         raycaster = new THREE.Raycaster();
-
         setupEventListeners();
         setupPointerLock();
     }
@@ -146,6 +153,10 @@ const Player = (function () {
         if (event.code === 'ShiftLeft') {
             isSprinting = true;
         }
+        if (event.code === 'KeyF') { // Toggle flying on 'F' press
+            isFlying = !isFlying;
+            velocity.set(0, 0, 0); // Reset velocity to stop any movement
+        }
         const key = parseInt(event.key);
         if (!isNaN(key) && key >= 0 && key <= 9) {
             selectedBlockType = key;
@@ -162,74 +173,124 @@ const Player = (function () {
 
     function update() {
         if (!yawObject) return;
-
+    
         const currentTime = performance.now();
         const deltaTime = (currentTime - lastTime) / 1000; // Convert to seconds
         lastTime = currentTime;
-
+    
         const direction = new THREE.Vector3();
         const rotation = yawObject.rotation.y;
-
+    
         if (keys['KeyW']) direction.z = -1;
         if (keys['KeyS']) direction.z = 1;
         if (keys['KeyA']) direction.x = -1;
         if (keys['KeyD']) direction.x = 1;
-
+    
         direction.applyAxisAngle(new THREE.Vector3(0, 1, 0), rotation);
-
-        // Check if the player is in water
-        isSwimming = checkWaterCollision(yawObject.position.x, yawObject.position.y + EYE_HEIGHT / 2, yawObject.position.z);
-
-        if (keys['Space']) {
-            if (isSwimming) {
-                velocity.y = SWIM_SPEED; // Swim upwards
-            } else if (canJump) {
-                velocity.y = JUMP_FORCE;
-                canJump = false;
+    
+        if (isFlying) {
+            // Flying movement logic
+            let flySpeed = isSprinting ? SPRINT_SPEED : NORMAL_SPEED;
+            flySpeed *= 2;
+    
+            // Get camera's forward and right vectors
+            const forward = new THREE.Vector3();
+            camera.getWorldDirection(forward);
+            forward.normalize();
+    
+            const right = new THREE.Vector3();
+            right.crossVectors(new THREE.Vector3(0, 1, 0), forward).normalize();
+    
+            const moveDirection = new THREE.Vector3();
+    
+            // Movement based on camera direction
+            if (keys['KeyW']) moveDirection.add(forward);
+            if (keys['KeyS']) moveDirection.sub(forward);
+            if (keys['KeyA']) moveDirection.add(right);
+            if (keys['KeyD']) moveDirection.sub(right);
+    
+            // Vertical movement
+            if (keys['Space']) moveDirection.y += 1;
+            if (keys['ShiftLeft']) moveDirection.y -= 1;
+    
+            if (moveDirection.length() > 0) {
+                moveDirection.normalize();
             }
-        }
-
-        // Apply gravity and vertical collision detection
-        velocity.y -= (isSwimming ? WATER_GRAVITY : GRAVITY) * deltaTime;
-        if (checkCollision(yawObject.position.x, yawObject.position.y + velocity.y * deltaTime, yawObject.position.z)) {
-            if (velocity.y < 0) {
-                canJump = true;
+    
+            const movement = moveDirection.multiplyScalar(flySpeed * deltaTime);
+            yawObject.position.add(movement);
+    
+            canJump = false; // Disable jumping while flying
+        } else {
+            // Original movement and physics (non-flying)
+            isSwimming = checkWaterCollision(yawObject.position.x, yawObject.position.y + EYE_HEIGHT / 2, yawObject.position.z);
+    
+            if (keys['Space']) {
+                if (isSwimming) {
+                    velocity.y = SWIM_SPEED; // Swim upwards
+                } else if (canJump) {
+                    velocity.y = JUMP_FORCE;
+                    canJump = false;
+                }
             }
-            velocity.y = 0;
-        }
-        yawObject.position.y += velocity.y * deltaTime;
-
-        const currentSpeed = isSwimming ? SWIM_SPEED : (isSprinting ? SPRINT_SPEED : NORMAL_SPEED);
-
-        // Horizontal movement and collision detection with auto-jump
-        const movement = direction.multiplyScalar(currentSpeed * deltaTime);
-        const newX = yawObject.position.x + movement.x;
-        const newZ = yawObject.position.z + movement.z;
-
-        // Check for collision at the new position
-        if (checkCollision(newX, yawObject.position.y, newZ)) {
-            // Check if we can step up
-            if (!checkCollision(newX, yawObject.position.y + STEP_HEIGHT, newZ)) {
-                // We can step up, so move the player up and forward
-                yawObject.position.y += STEP_HEIGHT;
+    
+            // Apply gravity and vertical collision detection
+            velocity.y -= (isSwimming ? WATER_GRAVITY : GRAVITY) * deltaTime;
+            if (checkCollision(yawObject.position.x, yawObject.position.y + velocity.y * deltaTime, yawObject.position.z)) {
+                if (velocity.y < 0) {
+                    canJump = true;
+                }
+                velocity.y = 0;
+            }
+            yawObject.position.y += velocity.y * deltaTime;
+    
+            const currentSpeed = isSwimming ? SWIM_SPEED : (isSprinting ? SPRINT_SPEED : NORMAL_SPEED);
+    
+            // Horizontal movement and collision detection with auto-jump
+            const movement = direction.multiplyScalar(currentSpeed * deltaTime);
+            const newX = yawObject.position.x + movement.x;
+            const newZ = yawObject.position.z + movement.z;
+    
+            // Check for collision at the new position
+            if (checkCollision(newX, yawObject.position.y, newZ)) {
+                // Check if we can step up
+                if (!checkCollision(newX, yawObject.position.y + STEP_HEIGHT, newZ)) {
+                    // We can step up, so move the player up and forward
+                    yawObject.position.y += STEP_HEIGHT;
+                    yawObject.position.x = newX;
+                    yawObject.position.z = newZ;
+                } else {
+                    // We can't step up, so just stop horizontal movement
+                    if (!checkCollision(newX, yawObject.position.y, yawObject.position.z)) {
+                        yawObject.position.x = newX;
+                    }
+                    if (!checkCollision(yawObject.position.x, yawObject.position.y, newZ)) {
+                        yawObject.position.z = newZ;
+                    }
+                }
+            } else {
+                // No collision, move normally
                 yawObject.position.x = newX;
                 yawObject.position.z = newZ;
-            } else {
-                // We can't step up, so just stop horizontal movement
-                if (!checkCollision(newX, yawObject.position.y, yawObject.position.z)) {
-                    yawObject.position.x = newX;
-                }
-                if (!checkCollision(yawObject.position.x, yawObject.position.y, newZ)) {
-                    yawObject.position.z = newZ;
-                }
             }
-        } else {
-            // No collision, move normally
-            yawObject.position.x = newX;
-            yawObject.position.z = newZ;
         }
-
-        // Ensure player doesn't fall through the world/*
+    
+        // Static collision check to prevent being stuck in blocks (only when not flying)
+        if (!isFlying) {
+            let resolved = false;
+            while (checkCollision(yawObject.position.x, yawObject.position.y, yawObject.position.z)) {
+                yawObject.position.y += 0.1; // Move up incrementally
+                resolved = true;
+                if (yawObject.position.y >= CHUNK_HEIGHT) break; // Prevent infinite loop
+            }
+    
+            if (resolved) {
+                velocity.y = 0;
+                canJump = true;
+            }
+        }
+    
+        // Ensure player doesn't fall through the world
         if (yawObject.position.y < -10) {
             yawObject.position.set(0, 200, 0);
             velocity.set(0, 0, 0);
@@ -269,7 +330,6 @@ const Player = (function () {
     function getObject() {
         return yawObject;
     }
-
 
     function getBlockGlobal(x, y, z) {
         const chunkX = Math.floor(x / CHUNK_SIZE);

@@ -2,7 +2,7 @@ import Player from './player.js';
 import { CHUNK_HEIGHT } from './constants.js';
 import { updateChunks, setBlock, getBlock, chunks } from './world.js';
 import { initWorld, notifySceneReady, initializationComplete } from './world.js';
-import { createSkybox, initRenderer, updateChunkGeometry, render } from './renderer.js';
+import { createSkybox, initRenderer, render } from './renderer.js';
 import { updateBlockSelector } from './utils.js';
 
 // Set up the scene, camera, and renderer
@@ -39,17 +39,19 @@ function animate() {
     requestAnimationFrame(animate);
     
     if (!gameStarted) {
-        if (initializationComplete) { // From world.js exports
+        if (initializationComplete) {
             gameStarted = true;
-            console.log("[Main] Starting game loop");
-        } else {
-            console.log("[Main] Waiting for initialization...");
-            return;
         }
+        return;
     }
     
     Player.update(getBlock);
     updateChunks(Player.getPosition());
+    
+    // Update camera matrix for frustum culling
+    camera.updateMatrixWorld();
+    
+    // Force render even if no changes
     render(scene, camera);
 }
 

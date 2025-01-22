@@ -1,13 +1,17 @@
 import { CHUNK_SIZE, CHUNK_HEIGHT, WATER_LEVEL, RENDER_DISTANCE } from './constants.js';
-import { chunkMeshes, updateChunkGeometry, removeChunkGeometry } from './renderer.js';
+import { chunkMeshes, removeChunkGeometry, scene } from './renderer.js';
 
 // Chunk states and initialization flags
 const CHUNK_LOADING = 1;
 const CHUNK_LOADED = 2;
 let chunkWorker = null;
+let geometryWorker = null;
 let initializationComplete = false;
 let workerInitialized = false;
 let sceneReady = false;
+let initialChunkLoaded = false;
+export let spawnPoint = null;
+export const collisionGeometry = new Map();
 
 // Chunk storage and queues
 const chunks = {};
@@ -43,6 +47,26 @@ export function initWorld() {
     const SEED = Math.random() * 1000000;
     console.log(`[World] Using seed: ${SEED}`);
 
+    
+    addToLoadQueue(0, 0, 0);
+
+    // Generate initial spawn point at chunk (0,0)
+    spawnPoint = findSuitableSpawnPoint(0, 0);
+    console.log("Generated spawn point:", spawnPoint);
+
+    geometryWorker = new Worker(new URL('./geometryWorker.js', import.meta.url), { type: 'module' });
+    geometryWorker.postMessage({
+        type: 'init',
+        materials: materials,
+        seed: SEED
+    });
+
+    geometryWorker.onmessage = function(e) {
+        if (e.data.type === 'geometry_data') {
+            createChunkMeshes(e.data.chunkX, e.data.chunkZ, e.data.solid, e.data.water);
+        }
+    };
+
     chunkWorker = new Worker(new URL('./chunksWorker.js', import.meta.url), {
         type: 'module'
     });
@@ -59,11 +83,18 @@ export function initWorld() {
             const { chunkX, chunkZ, chunkData } = e.data;
             const chunkKey = `${chunkX},${chunkZ}`;
     
-            // Remove distance check here - trust the chunk management system
+            // Store the raw ArrayBuffer and create typed array view
             chunks[chunkKey] = new Int8Array(chunkData);
             chunkStates[chunkKey] = CHUNK_LOADED;
             
-            updateChunkGeometry(chunkX, chunkZ);
+            // Send to geometry worker with proper transfer
+            geometryWorker.postMessage({
+                type: 'process_chunk',
+                chunkX,
+                chunkZ,
+                chunkData: chunkData // Directly use the received ArrayBuffer
+            }, [chunkData]); // Transfer the ArrayBuffer
+    
             updateAdjacentChunks(chunkX, chunkZ);
         }
     };
@@ -73,6 +104,80 @@ export function initWorld() {
         type: 'init',
         seed: SEED
     });
+}
+
+// scripts/world.js
+function createChunkMeshes(chunkX, chunkZ, solidData, waterData) {
+    const chunkKey = `${chunkX},${chunkZ}`;
+
+    // Remove existing meshes if they exist
+    if (chunkMeshes[chunkKey]) {
+        scene.remove(chunkMeshes[chunkKey].solid);
+        scene.remove(chunkMeshes[chunkKey].water);
+        chunkMeshes[chunkKey].solid.geometry.dispose();
+        chunkMeshes[chunkKey].water.geometry.dispose();
+    }
+
+    // Create materials with proper configuration
+    const solidMaterial = new THREE.MeshLambertMaterial({
+        vertexColors: true,
+        side: THREE.FrontSide, // Ensure front faces are rendered
+        transparent: false,
+        depthWrite: true
+    });
+    
+    const waterMaterial = new THREE.MeshStandardMaterial({
+        color: 0x6380ec,
+        transparent: true,
+        opacity: 0.7,
+        side: THREE.DoubleSide, // Water should be double-sided
+        metalness: 0.3,
+        roughness: 0.1
+    });
+
+    // Create geometries
+    const solidGeometry = createGeometryFromData(solidData);
+    const waterGeometry = createGeometryFromData(waterData);
+
+    // Create meshes
+    const solidMesh = new THREE.Mesh(solidGeometry, solidMaterial);
+    const waterMesh = new THREE.Mesh(waterGeometry, waterMaterial);
+
+    // Position meshes
+    const worldX = chunkX * CHUNK_SIZE;
+    const worldZ = chunkZ * CHUNK_SIZE;
+    solidMesh.position.set(worldX, 0, worldZ);
+    waterMesh.position.set(worldX, 0, worldZ);
+
+    // Add to scene
+    scene.add(solidMesh);
+    scene.add(waterMesh);
+
+    // Store references
+    chunkMeshes[chunkKey] = { solid: solidMesh, water: waterMesh };
+
+    // Enable shadows
+    solidMesh.castShadow = true;
+    solidMesh.receiveShadow = true;
+    waterMesh.receiveShadow = true;
+
+    console.log(`Created meshes for chunk`);
+}
+
+function createGeometryFromData(data) {
+    const geometry = new THREE.BufferGeometry();
+    
+    geometry.setAttribute('position', new THREE.BufferAttribute(data.positions, 3));
+    geometry.setAttribute('normal', new THREE.BufferAttribute(data.normals, 3));
+    
+    if (data.colors) {
+        geometry.setAttribute('color', new THREE.BufferAttribute(data.colors, 3));
+    }
+    
+    geometry.setIndex(new THREE.BufferAttribute(data.indices, 1));
+    geometry.computeBoundingSphere();
+    
+    return geometry;
 }
 
 // Notify when scene is ready
@@ -102,39 +207,44 @@ function updateAdjacentChunks(chunkX, chunkZ) {
     neighbors.forEach(([x, z]) => {
         const key = `${x},${z}`;
         if (chunks[key] && chunkStates[key] === CHUNK_LOADED) {
-            updateChunkGeometry(x, z);
+            // Queue for geometry update instead of direct call
+            addToLoadQueue(x, z, 0); // Highest priority
         }
     });
 }
 
-function addToLoadQueue(x, z) {
+function addToLoadQueue(x, z, priority = Infinity) {
     const chunkKey = `${x},${z}`;
     const dx = x - currentPlayerChunkX;
     const dz = z - currentPlayerChunkZ;
-    const buffer = RENDER_DISTANCE + 1;
     
-    // Check rectangular boundaries
-    if (Math.abs(dx) > buffer || Math.abs(dz) > buffer) return;
+    // Skip if out of bounds
+    if (Math.abs(dx) > RENDER_DISTANCE + 1 || Math.abs(dz) > RENDER_DISTANCE + 1) return;
     
-    // Calculate distance squared for prioritization
+    // Calculate priority based on distance
     const distanceSq = dx * dx + dz * dz;
+    const existing = chunkLoadQueue.find(c => c.x === x && c.z === z);
     
-    // Avoid duplicates
-    if (chunkLoadQueue.some(c => c.x === x && c.z === z)) return;
-    if (chunks[chunkKey] || chunkStates[chunkKey] === CHUNK_LOADING) return;
-
-    // Insert sorted by distance
-    const index = chunkLoadQueue.findIndex(c => {
-        const cDx = c.x - currentPlayerChunkX;
-        const cDz = c.z - currentPlayerChunkZ;
-        return distanceSq < (cDx * cDx + cDz * cDz);
+    if (existing) {
+        // Update priority if new request is more urgent
+        if (priority < existing.priority) {
+            existing.priority = priority;
+            existing.distanceSq = distanceSq;
+        }
+        return;
+    }
+    
+    chunkLoadQueue.push({
+        x, z,
+        priority: Math.min(priority, distanceSq),
+        distanceSq
     });
     
-    if (index === -1) {
-        chunkLoadQueue.push({ x, z, distanceSq });
-    } else {
-        chunkLoadQueue.splice(index, 0, { x, z, distanceSq });
-    }
+    // Keep the queue sorted by priority then distance
+    chunkLoadQueue.sort((a, b) => {
+        if (a.priority !== b.priority) return a.priority - b.priority;
+        return a.distanceSq - b.distanceSq;
+    });
 }
 
 function processChunkQueue() {
@@ -216,7 +326,7 @@ function setBlock(x, y, z, type) {
     if (y < 0 || y >= CHUNK_HEIGHT) return;
 
     chunks[chunkKey][localX + localZ * CHUNK_SIZE + y * CHUNK_SIZE * CHUNK_SIZE] = type;
-    updateChunkGeometry(chunkX, chunkZ);
+    addToLoadQueue(chunkX, chunkZ, 0);
 }
 
 function updateBlock(x, y, z, newBlockType) {
@@ -226,22 +336,18 @@ function updateBlock(x, y, z, newBlockType) {
     const localZ = ((z % CHUNK_SIZE) + CHUNK_SIZE) % CHUNK_SIZE;
 
     const chunkKey = `${chunkX},${chunkZ}`;
-    if (!chunks[chunkKey]) {
-        if (chunkStates[chunkKey] !== CHUNK_LOADING) {
-            addToLoadQueue(chunkX, chunkZ, Infinity);
-        }
-        return;
-    }
+    if (!chunks[chunkKey]) return;
 
     const index = localX + localZ * CHUNK_SIZE + y * CHUNK_SIZE * CHUNK_SIZE;
     chunks[chunkKey][index] = newBlockType;
 
-    updateChunkGeometry(chunkX, chunkZ);
+    // Queue for geometry update instead of direct call
+    addToLoadQueue(chunkX, chunkZ, 0); // Highest priority
 
-    if (localX === 0) updateChunkGeometry(chunkX - 1, chunkZ);
-    if (localX === CHUNK_SIZE - 1) updateChunkGeometry(chunkX + 1, chunkZ);
-    if (localZ === 0) updateChunkGeometry(chunkX, chunkZ - 1);
-    if (localZ === CHUNK_SIZE - 1) updateChunkGeometry(chunkX, chunkZ + 1);
+    if (localX === 0) addToLoadQueue(chunkX - 1, chunkZ, 0);
+    if (localX === CHUNK_SIZE - 1) addToLoadQueue(chunkX + 1, chunkZ, 0);
+    if (localZ === 0) addToLoadQueue(chunkX, chunkZ - 1, 0);
+    if (localZ === CHUNK_SIZE - 1) addToLoadQueue(chunkX, chunkZ + 1, 0);
 }
 
 function updateChunks(playerPosition) {
@@ -317,8 +423,11 @@ function cleanupChunkData(chunkKey) {
 function findSuitableSpawnPoint(chunkX, chunkZ) {
     const chunkKey = `${chunkX},${chunkZ}`;
     if (!chunks[chunkKey]) {
-        addToLoadQueue(chunkX, chunkZ, Infinity);
-        return { x: chunkX * CHUNK_SIZE + CHUNK_SIZE / 2, y: WATER_LEVEL + 2, z: chunkZ * CHUNK_SIZE + CHUNK_SIZE / 2 };
+        // Changed from Infinity to 0 for highest priority
+        addToLoadQueue(chunkX, chunkZ, 0); 
+        return { x: chunkX * CHUNK_SIZE + CHUNK_SIZE / 2, 
+                 y: CHUNK_HEIGHT, // Start at top
+                 z: chunkZ * CHUNK_SIZE + CHUNK_SIZE / 2 };
     }
 
     const centerX = Math.floor(CHUNK_SIZE / 2);
