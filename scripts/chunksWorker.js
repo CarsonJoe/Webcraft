@@ -98,8 +98,8 @@ function generateChunk(chunkX, chunkZ) {
             // Get noise values from initialized generators
             const baseHeight = (simplex.noise2D(worldX * 0.0025, worldZ * 0.0025) + 1) * 0.8;
             const detailHeight = (simplex.noise2D(worldX * 0.01, worldZ * 0.01) + 1) * 0.5;
-            const height = Math.floor((baseHeight * 0.8 + detailHeight * 0.2) * (CHUNK_HEIGHT - WATER_LEVEL)) + WATER_LEVEL;
-            
+            const height = Math.floor((baseHeight * 0.8 + detailHeight * 0.2) * (CHUNK_HEIGHT - WATER_LEVEL));
+
             // Use 3D noise for vertical variations
             const slateNoise = simplex.noise3D(worldX * 0.025, 0, worldZ * 0.025);
             const limestoneNoise = simplex.noise3D(worldX * 0.025, 100, worldZ * 0.025);
@@ -392,7 +392,7 @@ function getBlockInChunk(chunk, x, y, z) {
 function getHeightAtWorld(worldX, worldZ) {
     const baseHeight = (simplex.noise2D(worldX * 0.0025, worldZ * 0.0025) + 1) * 0.8;
     const detailHeight = (simplex.noise2D(worldX * 0.01, worldZ * 0.01) + 1) * 0.5;
-    return Math.floor((baseHeight * 0.8 + detailHeight * 0.2) * (CHUNK_HEIGHT - WATER_LEVEL)) + WATER_LEVEL; // Removed -20
+    return Math.floor((baseHeight * 0.8 + detailHeight * 0.2) * (CHUNK_HEIGHT - WATER_LEVEL)); // Removed -20
 }
 
 function setBlockIfInChunk(chunk, chunkX, chunkZ, worldX, worldZ, y, type, density = 1.0) {

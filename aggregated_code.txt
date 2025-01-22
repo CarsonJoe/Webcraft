@@ -1469,7 +1469,7 @@ function generateChunkFeatures(chunkX, chunkZ) {
                     break;
                 case BIOME_TYPES.FOREST:
                     if (featureValue > 0.8) featureType = 'largeTree';
-                    else if (featureValue > 0.2) featureType = 'smallTree';
+                    else if (featureValue > 0.6) featureType = 'smallTree';
                     else if (featureValue > -0.2) featureType = 'bush';
                     break;
                 case BIOME_TYPES.PLAINS:
@@ -1543,7 +1543,7 @@ function generateLargeTree(chunk, chunkX, chunkZ, worldX, worldZ, baseHeight) {
                         worldZ + dz,
                         y,
                         7, // Leaves
-                        0.5 // 80% density
+                        0.3 // 80% density
                     );
                 }
             }
@@ -1616,7 +1616,7 @@ function generateSmallTree(chunk, chunkX, chunkZ, worldX, worldZ, baseHeight) {
     }
 
     // Generate leaves
-    for (let y = baseHeight + trunkHeight - 2; y <= baseHeight + treeHeight && y < CHUNK_HEIGHT; y++) {
+    for (let y = baseHeight + trunkHeight; y <= baseHeight + treeHeight && y < CHUNK_HEIGHT; y++) {
         const layerRadius = leafRadius - Math.floor((y - (baseHeight + trunkHeight - 2)) / 3);
         for (let dx = -layerRadius; dx <= layerRadius; dx++) {
             for (let dz = -layerRadius; dz <= layerRadius; dz++) {
@@ -1629,7 +1629,7 @@ function generateSmallTree(chunk, chunkX, chunkZ, worldX, worldZ, baseHeight) {
                         worldZ + dz,
                         y,
                         7, // Leaves
-                        0.7 // 70% density
+                        0.5 // 70% density
                     );
                 }
             }
@@ -1645,10 +1645,9 @@ function getBlockInChunk(chunk, x, y, z) {
 }
 
 function getHeightAtWorld(worldX, worldZ) {
-    // Calculate height directly using noise instead of generating chunks
     const baseHeight = (simplex.noise2D(worldX * 0.0025, worldZ * 0.0025) + 1) * 0.8;
     const detailHeight = (simplex.noise2D(worldX * 0.01, worldZ * 0.01) + 1) * 0.5;
-    return Math.floor((baseHeight * 0.8 + detailHeight * 0.2) * (CHUNK_HEIGHT - WATER_LEVEL)) + WATER_LEVEL - 20;
+    return Math.floor((baseHeight * 0.8 + detailHeight * 0.2) * (CHUNK_HEIGHT - WATER_LEVEL)) + WATER_LEVEL; // Removed -20
 }
 
 function setBlockIfInChunk(chunk, chunkX, chunkZ, worldX, worldZ, y, type, density = 1.0) {
