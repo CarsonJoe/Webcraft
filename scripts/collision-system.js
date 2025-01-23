@@ -5,17 +5,14 @@ export function checkCollision(entity, deltaTime) {
     const { width, height, depth } = hitbox;
 
     const newPosition = new THREE.Vector3().addVectors(position, velocity.clone().multiplyScalar(deltaTime));
-
-    const corners = [
-        new THREE.Vector3(-width/2, 0, -depth/2),
-        new THREE.Vector3(width/2, 0, -depth/2),
-        new THREE.Vector3(-width/2, 0, depth/2),
-        new THREE.Vector3(width/2, 0, depth/2),
-        new THREE.Vector3(-width/2, height, -depth/2),
-        new THREE.Vector3(width/2, height, -depth/2),
-        new THREE.Vector3(-width/2, height, depth/2),
-        new THREE.Vector3(width/2, height, depth/2)
-    ];
+    
+    // Calculate hitbox bounds
+    const minX = newPosition.x - width / 2;
+    const maxX = newPosition.x + width / 2;
+    const minY = newPosition.y;
+    const maxY = newPosition.y + height;
+    const minZ = newPosition.z - depth / 2;
+    const maxZ = newPosition.z + depth / 2;
 
     const collisionInfo = {
         collided: false,
@@ -23,50 +20,38 @@ export function checkCollision(entity, deltaTime) {
         newPosition: newPosition.clone()
     };
 
-    ['x', 'y', 'z'].forEach(axis => {
-        let minCollision = Infinity;
-        let maxCollision = -Infinity;
+    // Check all blocks within the hitbox bounds
+    let collided = false;
+    for (let x = Math.floor(minX); x <= Math.floor(maxX); x++) {
+        for (let y = Math.floor(minY); y <= Math.floor(maxY); y++) {
+            for (let z = Math.floor(minZ); z <= Math.floor(maxZ); z++) {
+                const block = getBlock(x, y, z);
+                if (block !== 0 && block !== 5) {
+                    // Calculate overlap for each axis
+                    const overlapX = Math.min(maxX - x, (x + 1) - minX);
+                    const overlapY = Math.min(maxY - y, (y + 1) - minY);
+                    const overlapZ = Math.min(maxZ - z, (z + 1) - minZ);
 
-        corners.forEach(corner => {
-            const worldPos = new THREE.Vector3().addVectors(newPosition, corner);
-            const blockPos = worldPos.clone().floor();
-
-            for (let dx = -1; dx <= 1; dx++) {
-                for (let dy = -1; dy <= 1; dy++) {
-                    for (let dz = -1; dz <= 1; dz++) {
-                        const checkPos = blockPos.clone().add(new THREE.Vector3(dx, dy, dz));
-                        const block = getBlock(checkPos.x, checkPos.y, checkPos.z);
-
-                        if (block !== 0 && block !== 5) { // Not air and not water
-                            const blockBox = new THREE.Box3(checkPos, checkPos.clone().add(new THREE.Vector3(1, 1, 1)));
-                            const intersection = blockBox[axis] - worldPos[axis];
-
-                            if (velocity[axis] > 0) {
-                                minCollision = Math.min(minCollision, intersection);
-                            } else if (velocity[axis] < 0) {
-                                maxCollision = Math.max(maxCollision, intersection + 1);
-                            }
+                    // Find the smallest overlap to determine collision direction
+                    const minOverlap = Math.min(overlapX, overlapY, overlapZ);
+                    
+                    if (minOverlap > 0) {
+                        collided = true;
+                        // Adjust position based on collision direction
+                        if (minOverlap === overlapX) {
+                            collisionInfo.newPosition.x += velocity.x > 0 ? -overlapX : overlapX;
+                        } else if (minOverlap === overlapY) {
+                            collisionInfo.newPosition.y += velocity.y > 0 ? -overlapY : overlapY;
+                            if (velocity.y < 0) collisionInfo.onGround = true;
+                        } else {
+                            collisionInfo.newPosition.z += velocity.z > 0 ? -overlapZ : overlapZ;
                         }
+                        collisionInfo.collided = true;
                     }
                 }
             }
-        });
-
-        if (minCollision < Infinity) {
-            collisionInfo.newPosition[axis] = newPosition[axis] + minCollision - 0.001;
-            collisionInfo.collided = true;
-            if (axis === 'y') collisionInfo.onGround = true;
-        } else if (maxCollision > -Infinity) {
-            collisionInfo.newPosition[axis] = newPosition[axis] + maxCollision + 0.001;
-            collisionInfo.collided = true;
-            if (axis === 'y') collisionInfo.onGround = true;
         }
-    });
-
-    // Add debug logging
-    console.log('Collision Info:', collisionInfo);
-    console.log('Player Position:', position);
-    console.log('Player Velocity:', velocity);
+    }
 
     return collisionInfo;
 }

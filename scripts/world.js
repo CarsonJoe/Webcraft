@@ -1,18 +1,34 @@
-import { CHUNK_SIZE, CHUNK_HEIGHT, WATER_LEVEL, BEACH_LEVEL, RENDER_DISTANCE } from './constants.js';
-import { chunkMeshes, updateChunkGeometry } from './renderer.js';
+import { CHUNK_SIZE, CHUNK_HEIGHT, WATER_LEVEL, RENDER_DISTANCE } from './constants.js';
+import { chunkMeshes, removeChunkGeometry, scene } from './renderer.js';
 
-const simplex = new SimplexNoise();
-const blockColors = new Map();
+// Chunk states and initialization flags
+const CHUNK_LOADING = 1;
+const CHUNK_LOADED = 2;
+let chunkWorker = null;
+let geometryWorker = null;
+let initializationComplete = false;
+let workerInitialized = false;
+let sceneReady = false;
+export let spawnPoint = null;
+export const collisionGeometry = new Map();
 
+// Chunk storage and queues
 const chunks = {};
 const chunkStates = {};
 const chunkLoadQueue = [];
-let frameCounter = 0;
-const chunkUpdateQueue = [];
-const chunkRemovalQueue = [];
+const blockColors = new Map();
 
+let currentPlayerChunkX = 0;
+let currentPlayerChunkZ = 0;
+
+// Performance management
+const MAX_CHUNKS_PER_FRAME = 50;
+let frameBudget = 16; // Start with 16ms (~60fps)
+let lastFrameTime = performance.now();
+
+// Materials definition
 const materials = {
-    0: { color: 0x000000 }, // Air (black, but it won't be rendered)
+    0: { color: 0x000000 }, // Air
     1: { color: 0x6cc66c }, // Grass
     2: { color: 0x997260 }, // Dirt
     3: { color: 0x888888 }, // Stone
@@ -24,281 +40,270 @@ const materials = {
     9: { color: 0xFFFFFF }  // Limestone
 };
 
-const CHUNK_LOADED = 2;
+// Initialize world systems
+export function initWorld() {
+    console.log("[World] Initializing world system...");
+    const SEED = Math.random() * 1000000;
+    console.log(`[World] Using seed: ${SEED}`);
 
-const featureNoise = new SimplexNoise(Math.random());
-const biomeNoise = new SimplexNoise(Math.random());
-
-const BIOME_TYPES = {
-    PLAINS: 0,
-    FOREST: 1,
-    DENSE_FOREST: 2,
-    ROCKY: 3,
-    BARREN: 4
-};
-
-function getBiomeAt(x, z) {
-    const biomeValue = biomeNoise.noise2D(x * 0.005, z * 0.005);
-    if (biomeValue < -0.6) return BIOME_TYPES.BARREN;
-    if (biomeValue < -0.2) return BIOME_TYPES.ROCKY;
-    if (biomeValue < 0.2) return BIOME_TYPES.PLAINS;
-    if (biomeValue < 0.6) return BIOME_TYPES.FOREST;
-    return BIOME_TYPES.DENSE_FOREST;
-}
-
-function generateChunkFeatures(chunkX, chunkZ) {
-    const features = [];
-    const worldX = chunkX * CHUNK_SIZE;
-    const worldZ = chunkZ * CHUNK_SIZE;
-
-    for (let x = 0; x < CHUNK_SIZE; x += 3) {
-        for (let z = 0; z < CHUNK_SIZE; z += 3) {
-            const featureValue = featureNoise.noise2D((worldX + x) * 0.05, (worldZ + z) * 0.05);
-            const biome = getBiomeAt(worldX + x, worldZ + z);
-
-            let featureType = null;
-            switch (biome) {
-                case BIOME_TYPES.DENSE_FOREST:
-                    if (featureValue > 0.3) featureType = 'smallTree';
-                    else if (featureValue > -0.3) featureType = 'bush';
-                    break;
-                case BIOME_TYPES.FOREST:
-                    if (featureValue > 30) featureType = 'largeTree';
-                    else if (featureValue > 0.2) featureType = 'smallTree';
-                    else if (featureValue > -0.2) featureType = 'bush';
-                    break;
-                case BIOME_TYPES.PLAINS:
-                    if (featureValue > 0.8) featureType = 'largeTree';
-                    else if (featureValue > 0.5) featureType = 'bush';
-                    break;
-                case BIOME_TYPES.ROCKY:
-                    if (featureValue > 0.7) featureType = 'largeRock';
-                    break;
-                case BIOME_TYPES.BARREN:
-                    if (featureValue > 0.9) featureType = 'largeRock';
-                    break;
-            }
-
-            if (featureType) {
-                features.push({ type: featureType, x: x, z: z });
-            }
-        }
-    }
-
-    return features;
-}
-
-function generateChunk(chunkX, chunkZ) {
-    const chunk = new Int8Array(CHUNK_SIZE * CHUNK_SIZE * CHUNK_HEIGHT);
     
-    const grassDirtNoise = new SimplexNoise(Math.random());
+    addToLoadQueue(0, 0, 0);
 
-    for (let x = 0; x < CHUNK_SIZE; x++) {
-        for (let z = 0; z < CHUNK_SIZE; z++) {
-            const worldX = chunkX * CHUNK_SIZE + x;
-            const worldZ = chunkZ * CHUNK_SIZE + z;
-            
-            const baseHeight = (simplex.noise2D(worldX * 0.0025, worldZ * 0.0025) + 1) * 0.8;
-            const detailHeight = (simplex.noise2D(worldX * 0.01, worldZ * 0.01) + 1) * 0.5;
-            const height = Math.floor((baseHeight * 0.8 + detailHeight * 0.2) * (CHUNK_HEIGHT - WATER_LEVEL)) + WATER_LEVEL - 20;
+    // Generate initial spawn point at chunk (0,0)
+    spawnPoint = findSuitableSpawnPoint(0, 0);
+    console.log("Generated spawn point:", spawnPoint);
 
-            const slateNoise = simplex.noise3D(worldX * 0.025, 0, worldZ * 0.025);
-            const limestoneNoise = simplex.noise3D(worldX * 0.025, 100, worldZ * 0.025);
-
-            const biome = getBiomeAt(worldX, worldZ);
-            const grassDirtValue = grassDirtNoise.noise3D(worldX * 0.1, worldZ * 0.1, biome * 10);
-
-            for (let y = 0; y < CHUNK_HEIGHT; y++) {
-                let blockType;
-
-                if (y < height) {
-                    if (y < height - 5) {
-                        blockType = 3; // Stone
-                        if (y < CHUNK_HEIGHT / 2) {
-                            if (slateNoise > 0.3 && Math.random() < 0.7) blockType = 8; // Slate
-                        } else {
-                            if (limestoneNoise > 0.3 && Math.random() < 0.7) blockType = 9; // Limestone
-                        }
-                    } else if (y < height - 1) {
-                        blockType = 2; // Dirt
-                    } else {
-                        if (y <= BEACH_LEVEL) {
-                            blockType = 4; // Sand for beaches
-                        } else {
-                            const grassProbability = biome === BIOME_TYPES.BARREN ? 0.2 : 0.8;
-                            blockType = (grassDirtValue < grassProbability) ? 1 : 2; // Grass or dirt
-                        }
-                    }
-                } else if (y <= WATER_LEVEL) {
-                    blockType = 5; // Water
-                } else {
-                    blockType = 0; // Air
-                }
-
-                chunk[x + z * CHUNK_SIZE + y * CHUNK_SIZE * CHUNK_SIZE] = blockType;
-            }
-        }
-    }
-
-    const chunkFeatures = [];
-    for (let dx = -1; dx <= 1; dx++) {
-        for (let dz = -1; dz <= 1; dz++) {
-            const features = generateChunkFeatures(chunkX + dx, chunkZ + dz);
-            features.forEach(feature => {
-                const worldX = (chunkX + dx) * CHUNK_SIZE + feature.x;
-                const worldZ = (chunkZ + dz) * CHUNK_SIZE + feature.z;
-                chunkFeatures.push({ ...feature, worldX, worldZ });
-            });
-        }
-    }
-
-    chunkFeatures.forEach(feature => {
-        const localX = feature.worldX - chunkX * CHUNK_SIZE;
-        const localZ = feature.worldZ - chunkZ * CHUNK_SIZE;
-        if (localX >= -16 && localX < CHUNK_SIZE + 16 && localZ >= -16 && localZ < CHUNK_SIZE + 16) {
-            const baseHeight = getHeightAt(chunk, localX, localZ);
-            if (baseHeight > WATER_LEVEL && baseHeight < CHUNK_HEIGHT - 1) {
-                switch (feature.type) {
-                    case 'largeTree':
-                        generateLargeTree(chunk, localX, localZ, baseHeight);
-                        break;
-                    case 'smallTree':
-                        generateSmallTree(chunk, localX, localZ, baseHeight);
-                        break;
-                    case 'largeRock':
-                        generateLargeRockFormation(chunk, localX, localZ, baseHeight);
-                        break;
-                    case 'bush':
-                        generateBush(chunk, localX, localZ, baseHeight);
-                        break;
-                }
-            }
-        }
+    geometryWorker = new Worker(new URL('./geometryWorker.js', import.meta.url), { type: 'module' });
+    geometryWorker.postMessage({
+        type: 'init',
+        materials: materials,
+        seed: SEED
     });
 
-    return chunk;
-}
-
-
-function getHeightAt(chunk, x, z) {
-    if (x < 0 || x >= CHUNK_SIZE || z < 0 || z >= CHUNK_SIZE) {
-        return WATER_LEVEL;
-    }
-    for (let y = CHUNK_HEIGHT - 1; y >= 0; y--) {
-        if (chunk[x + z * CHUNK_SIZE + y * CHUNK_SIZE * CHUNK_SIZE] !== 0) {
-            return y;
+    geometryWorker.onmessage = function(e) {
+        if (e.data.type === 'geometry_data') {
+            createChunkMeshes(e.data.chunkX, e.data.chunkZ, e.data.solid, e.data.water);
         }
-    }
-    return 0;
-}
+    };
 
-function generateLargeTree(chunk, x, z, baseHeight) {
-    const treeHeight = Math.floor(Math.random() * 10) + 15;
-    const trunkHeight = Math.floor(treeHeight * 0.7);
-    const leafRadius = Math.floor(treeHeight * 0.4) + 2;
-    
-    // Check if there's already a tree at this location
-    if (getBlockInChunk(chunk, x, baseHeight, z) === 6) {
-        return; // Don't spawn a tree on top of another tree
-    }
-    
-    // Generate trunk
-    for (let y = baseHeight; y < baseHeight + trunkHeight && y < CHUNK_HEIGHT; y++) {
-        setBlockInChunk(chunk, x, y, z, 6); // Wood
-        // Add some thickness to the trunk
-        if (Math.random() < 0.3) setBlockInChunk(chunk, x + 1, y, z, 6);
-        if (Math.random() < 0.3) setBlockInChunk(chunk, x - 1, y, z, 6);
-        if (Math.random() < 0.3) setBlockInChunk(chunk, x, y, z + 1, 6);
-        if (Math.random() < 0.3) setBlockInChunk(chunk, x, y, z - 1, 6);
-    }
-    
-    // Generate leaves
-    for (let y = baseHeight + trunkHeight - 5; y <= baseHeight + treeHeight && y < CHUNK_HEIGHT; y++) {
-        const layerRadius = leafRadius - Math.floor((y - (baseHeight + trunkHeight - 5)) / 3);
-        for (let ox = -layerRadius; ox <= layerRadius; ox++) {
-            for (let oz = -layerRadius; oz <= layerRadius; oz++) {
-                if (ox * ox + oz * oz <= layerRadius * layerRadius * (0.7 + Math.random() * 0.3)) {
-                    if (Math.random() < 0.8) { // 80% chance to place a leaf block
-                        setBlockInChunk(chunk, x + ox, y, z + oz, 7); // Leaves
-                    }
-                }
+    chunkWorker = new Worker(new URL('./chunksWorker.js', import.meta.url), {
+        type: 'module'
+    });
+    console.log("[World] Web Worker created");
+
+    chunkWorker.onmessage = function(e) {
+        if (e.data.type === 'init_complete') {
+            workerInitialized = true;
+            checkInitialization();
+            if (sceneReady) {
+                processChunkQueue();
             }
-        }
-    }
-}
-
-function generateSmallTree(chunk, x, z, baseHeight) {
-    const treeHeight = Math.floor(Math.random() * 5) + 5;
-    const trunkHeight = Math.floor(treeHeight * 0.6);
-    const leafRadius = Math.floor(treeHeight * 0.5) + 1;
+        } else if (e.data.type === 'chunk_data') {
+            const { chunkX, chunkZ, chunkData } = e.data;
+            const chunkKey = `${chunkX},${chunkZ}`;
     
-    // Check if there's already a tree at this location
-    if (getBlockInChunk(chunk, x, baseHeight, z) === 6) {
-        return; // Don't spawn a tree on top of another tree
-    }
+            // 1. Clone the received buffer for main thread storage
+            const clonedBuffer = new ArrayBuffer(chunkData.byteLength);
+            new Int8Array(clonedBuffer).set(new Int8Array(chunkData));
+            
+            // 2. Store cloned buffer in chunks
+            chunks[chunkKey] = new Int8Array(clonedBuffer);
+            chunkStates[chunkKey] = CHUNK_LOADED;
     
-    // Generate trunk
-    for (let y = baseHeight; y < baseHeight + trunkHeight && y < CHUNK_HEIGHT; y++) {
-        setBlockInChunk(chunk, x, y, z, 6); // Wood
-    }
+            // 3. Prepare adjacent chunks with fresh buffers
+            const transferList = [chunkData]; // Transfer original buffer
+            const adjacentChunks = {};
     
-    // Generate leaves
-    for (let y = baseHeight + trunkHeight - 2; y <= baseHeight + treeHeight && y < CHUNK_HEIGHT; y++) {
-        const layerRadius = leafRadius - Math.floor((y - (baseHeight + trunkHeight - 2)) / 3);
-        for (let ox = -layerRadius; ox <= layerRadius; ox++) {
-            for (let oz = -layerRadius; oz <= layerRadius; oz++) {
-                if (ox * ox + oz * oz <= layerRadius * layerRadius * (0.8 + Math.random() * 0.2)) {
-                    if (Math.random() < 0.7) { // 70% chance to place a leaf block
-                        setBlockInChunk(chunk, x + ox, y, z + oz, 7); // Leaves
-                    }
+            [[1,0], [-1,0], [0,1], [0,-1]].forEach(([dx, dz]) => {
+                const adjKey = `${chunkX + dx},${chunkZ + dz}`;
+                if (chunks[adjKey]) {
+                    // Clone adjacent chunk's buffer for transfer
+                    const adjClone = new ArrayBuffer(chunks[adjKey].buffer.byteLength);
+                    new Int8Array(adjClone).set(chunks[adjKey]);
+                    adjacentChunks[adjKey] = adjClone;
+                    transferList.push(adjClone);
                 }
-            }
-        }
-    }
-}
-
-// Helper function to get a block from the chunk
-function getBlockInChunk(chunk, x, y, z) {
-    if (x >= 0 && x < CHUNK_SIZE && z >= 0 && z < CHUNK_SIZE && y >= 0 && y < CHUNK_HEIGHT) {
-        return chunk[x + z * CHUNK_SIZE + y * CHUNK_SIZE * CHUNK_SIZE];
-    }
-    return 0; // Return air for out-of-bounds blocks
-}
-
-function generateLargeRockFormation(chunk, x, z, baseHeight) {
-    const rockHeight = Math.floor(Math.random() * 4) + 2;
-    const rockRadius = Math.floor(rockHeight * 0.7) + 1;
-    const rockType = Math.random() < 0.5 ? 3 : 8; // Stone or Slate
+            });
     
-    for (let y = baseHeight; y < baseHeight + rockHeight && y < CHUNK_HEIGHT; y++) {
-        const layerRadius = Math.max(1, rockRadius - Math.floor((y - baseHeight) / 2));
-        for (let ox = -layerRadius; ox <= layerRadius; ox++) {
-            for (let oz = -layerRadius; oz <= layerRadius; oz++) {
-                if (ox * ox + oz * oz <= layerRadius * layerRadius * (0.7 + Math.random() * 0.3)) {
-                    setBlockInChunk(chunk, x + ox, y, z + oz, rockType);
-                }
-            }
-        }
-    }
-}
-
-function generateBush(chunk, x, z, baseHeight) {
-    const bushSize = Math.floor(Math.random() * 2) + 2;
+            // 4. Send message with transferrable buffers
+            geometryWorker.postMessage({
+                type: 'process_chunk',
+                chunkX,
+                chunkZ,
+                chunkData: chunkData,
+                adjacentChunks
+            }, transferList);
     
-    for (let y = baseHeight; y < baseHeight + bushSize && y < CHUNK_HEIGHT; y++) {
-        for (let ox = -1; ox <= 1; ox++) {
-            for (let oz = -1; oz <= 1; oz++) {
-                if (Math.random() < 0.7) {
-                    setBlockInChunk(chunk, x + ox, y, z + oz, 7); // Leaves
-                }
-            }
+            updateAdjacentChunks(chunkX, chunkZ);
         }
+    };
+
+    console.log("[World] Sending worker init message");
+    chunkWorker.postMessage({
+        type: 'init',
+        seed: SEED
+    });
+}
+
+// scripts/world.js
+function createChunkMeshes(chunkX, chunkZ, solidData, waterData) {
+    const chunkKey = `${chunkX},${chunkZ}`;
+
+    // Remove existing meshes if they exist
+    if (chunkMeshes[chunkKey]) {
+        scene.remove(chunkMeshes[chunkKey].solid);
+        scene.remove(chunkMeshes[chunkKey].water);
+        chunkMeshes[chunkKey].solid.geometry.dispose();
+        chunkMeshes[chunkKey].water.geometry.dispose();
+    }
+
+    // Create materials with proper configuration
+    const solidMaterial = new THREE.MeshLambertMaterial({
+        vertexColors: true,
+        side: THREE.FrontSide, // Ensure front faces are rendered
+        transparent: false,
+        depthWrite: true
+    });
+    
+    const waterMaterial = new THREE.MeshStandardMaterial({
+        color: 0x6380ec,
+        transparent: true,
+        opacity: 0.7,
+        side: THREE.DoubleSide, // Water should be double-sided
+        metalness: 0.3,
+        roughness: 0.1
+    });
+
+    // Create geometries
+    const solidGeometry = createGeometryFromData(solidData);
+    const waterGeometry = createGeometryFromData(waterData);
+
+    // Create meshes
+    const solidMesh = new THREE.Mesh(solidGeometry, solidMaterial);
+    const waterMesh = new THREE.Mesh(waterGeometry, waterMaterial);
+
+    // Position meshes
+    const worldX = chunkX * CHUNK_SIZE;
+    const worldZ = chunkZ * CHUNK_SIZE;
+    solidMesh.position.set(worldX, 0, worldZ);
+    waterMesh.position.set(worldX, 0, worldZ);
+
+    // Add to scene
+    scene.add(solidMesh);
+    scene.add(waterMesh);
+
+    // Store references
+    chunkMeshes[chunkKey] = { solid: solidMesh, water: waterMesh };
+
+    // Enable shadows
+    solidMesh.castShadow = true;
+    solidMesh.receiveShadow = true;
+    waterMesh.receiveShadow = true;
+
+    console.log(`Created meshes for chunk`);
+}
+
+function createGeometryFromData(data) {
+    const geometry = new THREE.BufferGeometry();
+    
+    geometry.setAttribute('position', new THREE.BufferAttribute(data.positions, 3));
+    geometry.setAttribute('normal', new THREE.BufferAttribute(data.normals, 3));
+    
+    if (data.colors) {
+        geometry.setAttribute('color', new THREE.BufferAttribute(data.colors, 3));
+    }
+    
+    geometry.setIndex(new THREE.BufferAttribute(data.indices, 1));
+    geometry.computeBoundingSphere();
+    
+    return geometry;
+}
+
+// Notify when scene is ready
+export function notifySceneReady() {
+    sceneReady = true;
+    console.log("[World] Scene ready:", sceneReady);
+    checkInitialization();
+}
+
+function checkInitialization() {
+    if (workerInitialized && sceneReady) {
+        initializationComplete = true;
+        console.log("[World] Full initialization complete");
+        // Start initial chunk processing
+        processChunkQueue();
     }
 }
 
-function setBlockInChunk(chunk, x, y, z, blockType) {
-    if (x >= 0 && x < CHUNK_SIZE && z >= 0 && z < CHUNK_SIZE && y >= 0 && y < CHUNK_HEIGHT) {
-        chunk[x + z * CHUNK_SIZE + y * CHUNK_SIZE * CHUNK_SIZE] = blockType;
+function updateAdjacentChunks(chunkX, chunkZ) {
+    const neighbors = [
+        [chunkX + 1, chunkZ],
+        [chunkX - 1, chunkZ],
+        [chunkX, chunkZ + 1],
+        [chunkX, chunkZ - 1]
+    ];
+
+    neighbors.forEach(([x, z]) => {
+        const key = `${x},${z}`;
+        if (chunks[key] && chunkStates[key] === CHUNK_LOADED) {
+            // Send existing adjacent chunks to geometry worker for mesh regeneration
+            sendChunkToGeometryWorker(x, z);
+        }
+    });
+}
+
+function addToLoadQueue(x, z, priority = Infinity) {
+    const chunkKey = `${x},${z}`;
+    const dx = x - currentPlayerChunkX;
+    const dz = z - currentPlayerChunkZ;
+    
+    // Skip if out of bounds
+    if (Math.abs(dx) > RENDER_DISTANCE + 1 || Math.abs(dz) > RENDER_DISTANCE + 1) return;
+    
+    // Calculate priority based on distance
+    const distanceSq = dx * dx + dz * dz;
+    const existing = chunkLoadQueue.find(c => c.x === x && c.z === z);
+    
+    if (existing) {
+        // Update priority if new request is more urgent
+        if (priority < existing.priority) {
+            existing.priority = priority;
+            existing.distanceSq = distanceSq;
+        }
+        return;
+    }
+    
+    chunkLoadQueue.push({
+        x, z,
+        priority: Math.min(priority, distanceSq),
+        distanceSq
+    });
+    
+    // Keep the queue sorted by priority then distance
+    chunkLoadQueue.sort((a, b) => {
+        if (a.priority !== b.priority) return a.priority - b.priority;
+        return a.distanceSq - b.distanceSq;
+    });
+}
+
+function processChunkQueue() {
+    if (!workerInitialized || !sceneReady) return;
+
+    // Calculate time since last frame and adjust budget
+    const now = performance.now();
+    const timeSinceLastFrame = now - lastFrameTime;
+    lastFrameTime = now;
+
+    // Adjust frame budget based on actual frame time
+    if (timeSinceLastFrame < 16) {
+        frameBudget += 16 - timeSinceLastFrame; // We have extra time
+    } else {
+        frameBudget -= timeSinceLastFrame - 16; // We're running behind
+    }
+    
+    // Keep frame budget within reasonable bounds
+    frameBudget = Math.max(8, Math.min(32, frameBudget));
+
+    const startTime = performance.now();
+    let processed = 0;
+    
+    while (chunkLoadQueue.length > 0 && processed < MAX_CHUNKS_PER_FRAME) {
+        const { x, z } = chunkLoadQueue.shift();
+        const chunkKey = `${x},${z}`;
+        
+        if (!chunks[chunkKey] && chunkStates[chunkKey] !== CHUNK_LOADING) {
+            chunkStates[chunkKey] = CHUNK_LOADING;
+            chunkWorker.postMessage({ chunkX: x, chunkZ: z });
+            processed++;
+        }
+        
+        // Check if we've exceeded our frame budget
+        if (performance.now() - startTime > frameBudget) break;
+    }
+    
+    // If there are still chunks to process, schedule next frame
+    if (chunkLoadQueue.length > 0) {
+        requestAnimationFrame(processChunkQueue);
     }
 }
 
@@ -308,13 +313,16 @@ function getBlock(x, y, z) {
     const chunkKey = `${chunkX},${chunkZ}`;
 
     if (!chunks[chunkKey]) {
-        chunks[chunkKey] = generateChunk(chunkX, chunkZ);
+        if (chunkStates[chunkKey] !== CHUNK_LOADING) {
+            addToLoadQueue(chunkX, chunkZ, Infinity);
+        }
+        return 0;
     }
 
     const localX = ((x % CHUNK_SIZE) + CHUNK_SIZE) % CHUNK_SIZE;
     const localZ = ((z % CHUNK_SIZE) + CHUNK_SIZE) % CHUNK_SIZE;
 
-    if (y < 0 || y >= CHUNK_HEIGHT) return 0; // Air outside vertical bounds
+    if (y < 0 || y >= CHUNK_HEIGHT) return 0;
 
     return chunks[chunkKey][localX + localZ * CHUNK_SIZE + y * CHUNK_SIZE * CHUNK_SIZE] || 0;
 }
@@ -325,16 +333,19 @@ function setBlock(x, y, z, type) {
     const chunkKey = `${chunkX},${chunkZ}`;
 
     if (!chunks[chunkKey]) {
-        chunks[chunkKey] = generateChunk(chunkX, chunkZ);
+        if (chunkStates[chunkKey] !== CHUNK_LOADING) {
+            addToLoadQueue(chunkX, chunkZ, Infinity);
+        }
+        return;
     }
 
     const localX = ((x % CHUNK_SIZE) + CHUNK_SIZE) % CHUNK_SIZE;
     const localZ = ((z % CHUNK_SIZE) + CHUNK_SIZE) % CHUNK_SIZE;
 
-    if (y < 0 || y >= CHUNK_HEIGHT) return; // Don't set blocks outside vertical bounds
+    if (y < 0 || y >= CHUNK_HEIGHT) return;
 
     chunks[chunkKey][localX + localZ * CHUNK_SIZE + y * CHUNK_SIZE * CHUNK_SIZE] = type;
-    updateChunkGeometry(chunkX, chunkZ);
+    addToLoadQueue(chunkX, chunkZ, 0);
 }
 
 function updateBlock(x, y, z, newBlockType) {
@@ -344,122 +355,132 @@ function updateBlock(x, y, z, newBlockType) {
     const localZ = ((z % CHUNK_SIZE) + CHUNK_SIZE) % CHUNK_SIZE;
 
     const chunkKey = `${chunkX},${chunkZ}`;
-    if (!chunks[chunkKey]) {
-        chunks[chunkKey] = generateChunk(chunkX, chunkZ);
-    }
+    if (!chunks[chunkKey]) return;
+
     const index = localX + localZ * CHUNK_SIZE + y * CHUNK_SIZE * CHUNK_SIZE;
     chunks[chunkKey][index] = newBlockType;
 
-    updateChunkGeometry(chunkX, chunkZ);
+    addToLoadQueue(chunkX, chunkZ, 0);
+    sendChunkToGeometryWorker(chunkX, chunkZ);
 
-    if (localX === 0) updateChunkGeometry(chunkX - 1, chunkZ);
-    if (localX === CHUNK_SIZE - 1) updateChunkGeometry(chunkX + 1, chunkZ);
-    if (localZ === 0) updateChunkGeometry(chunkX, chunkZ - 1);
-    if (localZ === CHUNK_SIZE - 1) updateChunkGeometry(chunkX, chunkZ + 1);
+    if (localX === 0) sendChunkToGeometryWorker(chunkX - 1, chunkZ);
+    if (localX === CHUNK_SIZE - 1) sendChunkToGeometryWorker(chunkX + 1, chunkZ);
+    if (localZ === 0) sendChunkToGeometryWorker(chunkX, chunkZ - 1);
+    if (localZ === CHUNK_SIZE - 1) sendChunkToGeometryWorker(chunkX, chunkZ + 1);
 }
 
-function addToLoadQueue(x, z, priority) {
-    chunkLoadQueue.push({ x, z, priority });
-    chunkLoadQueue.sort((a, b) => b.priority - a.priority);
+function sendChunkToGeometryWorker(chunkX, chunkZ) {
+    const chunkKey = `${chunkX},${chunkZ}`;
+    if (!chunks[chunkKey]) return;
+
+    const chunkData = chunks[chunkKey];
+    const clonedChunkData = new Int8Array(chunkData).buffer;
+
+    const adjacentChunks = {};
+    [[1,0], [-1,0], [0,1], [0,-1]].forEach(([dx, dz]) => {
+        const adjChunkX = chunkX + dx;
+        const adjChunkZ = chunkZ + dz;
+        const adjKey = `${adjChunkX},${adjChunkZ}`;
+        if (chunks[adjKey]) {
+            const adjClone = new Int8Array(chunks[adjKey]).buffer;
+            adjacentChunks[adjKey] = adjClone;
+        }
+    });
+
+    const transferList = [clonedChunkData];
+    Object.values(adjacentChunks).forEach(buffer => transferList.push(buffer));
+
+    geometryWorker.postMessage({
+        type: 'process_chunk',
+        chunkX,
+        chunkZ,
+        chunkData: clonedChunkData,
+        adjacentChunks
+    }, transferList);
 }
 
-function processChunkQueue() {
-    const MAX_CHUNKS_PER_FRAME = 1;
-    let processedChunks = 0;
+function updateChunks(playerPosition) {
+    if (!playerPosition || !initializationComplete) return;
 
-    while (chunkLoadQueue.length > 0 && processedChunks < MAX_CHUNKS_PER_FRAME) {
-        const { x, z } = chunkLoadQueue.shift();
-        const chunkKey = `${x},${z}`;
+    // Update player chunk position
+    currentPlayerChunkX = Math.floor(playerPosition.x / CHUNK_SIZE);
+    currentPlayerChunkZ = Math.floor(playerPosition.z / CHUNK_SIZE);
 
-        if (!chunks[chunkKey]) {
-            chunks[chunkKey] = generateChunk(x, z);
-            chunkStates[chunkKey] = CHUNK_LOADED;
-            updateChunkGeometry(x, z);
-            processedChunks++;
+    const chunksToKeep = new Set();
+    const buffer = RENDER_DISTANCE + 1;
+
+    // First pass: Collect all chunks in rectangular area
+    const chunksToCheck = [];
+    for (let dx = -buffer; dx <= buffer; dx++) {
+        for (let dz = -buffer; dz <= buffer; dz++) {
+            const x = currentPlayerChunkX + dx;
+            const z = currentPlayerChunkZ + dz;
+            chunksToCheck.push({ x, z });
+            chunksToKeep.add(`${x},${z}`);
         }
     }
 
-    if (chunkLoadQueue.length > 0) {
-        requestAnimationFrame(processChunkQueue);
-    }
-}
+    // Sort chunks by distance to player
+    chunksToCheck.sort((a, b) => {
+        const aDx = a.x - currentPlayerChunkX;
+        const aDz = a.z - currentPlayerChunkZ;
+        const bDx = b.x - currentPlayerChunkX;
+        const bDz = b.z - currentPlayerChunkZ;
+        return (aDx * aDx + aDz * aDz) - (bDx * bDx + bDz * bDz);
+    });
 
-function updateChunks(scene, playerPosition) {
-    if (!playerPosition) return;
+    // Add chunks to queue in sorted order
+    chunksToCheck.forEach(({ x, z }) => addToLoadQueue(x, z));
 
-    frameCounter++;
-    const playerChunkX = Math.floor(playerPosition.x / CHUNK_SIZE);
-    const playerChunkZ = Math.floor(playerPosition.z / CHUNK_SIZE);
-
-    // Set to keep track of chunks that should be loaded
-    const chunksToKeep = new Set();
-
-    // Load and update chunks within render distance
-    for (let x = playerChunkX - RENDER_DISTANCE; x <= playerChunkX + RENDER_DISTANCE; x++) {
-        for (let z = playerChunkZ - RENDER_DISTANCE; z <= playerChunkZ + RENDER_DISTANCE; z++) {
-            const chunkKey = `${x},${z}`;
-            chunksToKeep.add(chunkKey);
-
-            const distance = Math.sqrt((x - playerChunkX) ** 2 + (z - playerChunkZ) ** 2);
-
-            if (!chunks[chunkKey]) {
-                addToLoadQueue(x, z, 1 / (distance + 1));
-            } else if (!chunkMeshes[chunkKey]) {
-                // Instead of updating immediately, add to the update queue
-                if (!chunkUpdateQueue.includes(chunkKey)) {
-                    chunkUpdateQueue.push(chunkKey);
-                }
+    // Remove out-of-range chunks
+    Object.keys(chunkMeshes).forEach(chunkKey => {
+        if (!chunksToKeep.has(chunkKey)) {
+            const [x, z] = chunkKey.split(',').map(Number);
+            const dx = x - currentPlayerChunkX;
+            const dz = z - currentPlayerChunkZ;
+            
+            if (Math.abs(dx) > buffer || Math.abs(dz) > buffer) {
+                removeChunkGeometry(x, z);
+                cleanupChunkData(chunkKey);
             }
         }
-    }
-
-    // Queue chunks for removal if they're out of render distance
-    for (const chunkKey in chunkMeshes) {
-        if (!chunksToKeep.has(chunkKey) && !chunkRemovalQueue.includes(chunkKey)) {
-            chunkRemovalQueue.push(chunkKey);
-        }
-    }
-
-    // Update one chunk per frame
-    if (chunkUpdateQueue.length > 0) {
-        const chunkKey = chunkUpdateQueue.shift();
-        const [x, z] = chunkKey.split(',').map(Number);
-        updateChunkGeometry(x, z, scene);
-    }
-
-    // Remove up to two chunks per frame
-    for (let i = 0; i < 2 && chunkRemovalQueue.length > 0; i++) {
-        const chunkKey = chunkRemovalQueue.shift();
-        const [x, z] = chunkKey.split(',').map(Number);
-        scene.remove(chunkMeshes[chunkKey].solid);
-        scene.remove(chunkMeshes[chunkKey].water);
-        chunkMeshes[chunkKey].solid.geometry.dispose();
-        chunkMeshes[chunkKey].water.geometry.dispose();
-        delete chunkMeshes[chunkKey];
-        delete chunks[chunkKey];
-        delete chunkStates[chunkKey];
-    }
+    });
 
     processChunkQueue();
 }
 
+// New cleanup function in world.js
+function cleanupChunkData(chunkKey) {
+    // Clear chunk data
+    delete chunks[chunkKey];
+    delete chunkStates[chunkKey];
+}
+
 function findSuitableSpawnPoint(chunkX, chunkZ) {
-    const chunk = generateChunk(chunkX, chunkZ);
+    const chunkKey = `${chunkX},${chunkZ}`;
+    if (!chunks[chunkKey]) {
+        // Changed from Infinity to 0 for highest priority
+        addToLoadQueue(chunkX, chunkZ, 0); 
+        return { x: chunkX * CHUNK_SIZE + CHUNK_SIZE / 2, 
+                 y: CHUNK_HEIGHT, // Start at top
+                 z: chunkZ * CHUNK_SIZE + CHUNK_SIZE / 2 };
+    }
+
     const centerX = Math.floor(CHUNK_SIZE / 2);
     const centerZ = Math.floor(CHUNK_SIZE / 2);
-    
-    let spawnY = getHeightAt(chunk, centerX, centerZ);
-    
-    // Ensure the spawn point is above water level and not too high
-    if (spawnY <= WATER_LEVEL) {
-        spawnY = WATER_LEVEL + 1;
-    } else if (spawnY >= CHUNK_HEIGHT - 10) {
-        spawnY = CHUNK_HEIGHT - 10;
+    let spawnY = 0;
+
+    for (let y = CHUNK_HEIGHT - 1; y >= 0; y--) {
+        if (chunks[chunkKey][centerX + centerZ * CHUNK_SIZE + y * CHUNK_SIZE * CHUNK_SIZE] !== 0) {
+            spawnY = y + 2;
+            break;
+        }
     }
-    
-    // Add a little elevation to ensure the player spawns above ground
-    spawnY += 2;
-    
+
+    if (spawnY <= WATER_LEVEL) {
+        spawnY = WATER_LEVEL + 2;
+    }
+
     return {
         x: chunkX * CHUNK_SIZE + centerX,
         y: spawnY,
@@ -467,4 +488,15 @@ function findSuitableSpawnPoint(chunkX, chunkZ) {
     };
 }
 
-export { generateChunk, updateChunks, setBlock, getBlock, chunks, materials, blockColors, updateBlock, findSuitableSpawnPoint };
+export {
+    updateChunks,
+    setBlock,
+    getBlock,
+    chunks,
+    materials,
+    blockColors,
+    updateBlock,
+    findSuitableSpawnPoint,
+    addToLoadQueue,
+    initializationComplete,
+};

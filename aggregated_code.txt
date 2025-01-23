@@ -1,0 +1,1972 @@
+
+================================================================================
+File: ./scripts/collision-system.js
+================================================================================
+
+import { getBlock } from './world.js';
+
+export function checkCollision(entity, deltaTime) {
+    const { position, velocity, hitbox } = entity;
+    const { width, height, depth } = hitbox;
+
+    const newPosition = new THREE.Vector3().addVectors(position, velocity.clone().multiplyScalar(deltaTime));
+    
+    // Calculate hitbox bounds
+    const minX = newPosition.x - width / 2;
+    const maxX = newPosition.x + width / 2;
+    const minY = newPosition.y;
+    const maxY = newPosition.y + height;
+    const minZ = newPosition.z - depth / 2;
+    const maxZ = newPosition.z + depth / 2;
+
+    const collisionInfo = {
+        collided: false,
+        onGround: false,
+        newPosition: newPosition.clone()
+    };
+
+    // Check all blocks within the hitbox bounds
+    let collided = false;
+    for (let x = Math.floor(minX); x <= Math.floor(maxX); x++) {
+        for (let y = Math.floor(minY); y <= Math.floor(maxY); y++) {
+            for (let z = Math.floor(minZ); z <= Math.floor(maxZ); z++) {
+                const block = getBlock(x, y, z);
+                if (block !== 0 && block !== 5) {
+                    // Calculate overlap for each axis
+                    const overlapX = Math.min(maxX - x, (x + 1) - minX);
+                    const overlapY = Math.min(maxY - y, (y + 1) - minY);
+                    const overlapZ = Math.min(maxZ - z, (z + 1) - minZ);
+
+                    // Find the smallest overlap to determine collision direction
+                    const minOverlap = Math.min(overlapX, overlapY, overlapZ);
+                    
+                    if (minOverlap > 0) {
+                        collided = true;
+                        // Adjust position based on collision direction
+                        if (minOverlap === overlapX) {
+                            collisionInfo.newPosition.x += velocity.x > 0 ? -overlapX : overlapX;
+                        } else if (minOverlap === overlapY) {
+                            collisionInfo.newPosition.y += velocity.y > 0 ? -overlapY : overlapY;
+                            if (velocity.y < 0) collisionInfo.onGround = true;
+                        } else {
+                            collisionInfo.newPosition.z += velocity.z > 0 ? -overlapZ : overlapZ;
+                        }
+                        collisionInfo.collided = true;
+                    }
+                }
+            }
+        }
+    }
+
+    return collisionInfo;
+}
+
+================================================================================
+File: ./scripts/constants.js
+================================================================================
+
+// constants.js
+export const CHUNK_SIZE = 8;
+export const CHUNK_HEIGHT = 100;
+export const WATER_LEVEL = 24;
+export const BEACH_LEVEL = WATER_LEVEL + 2;
+export const RENDER_DISTANCE = 17;
+
+================================================================================
+File: ./scripts/main.js
+================================================================================
+
+import Player from './player.js';
+import { CHUNK_HEIGHT } from './constants.js';
+import { updateChunks, setBlock, getBlock, chunks } from './world.js';
+import { initWorld, notifySceneReady, initializationComplete } from './world.js';
+import { createSkybox, initRenderer, render } from './renderer.js';
+import { updateBlockSelector } from './utils.js';
+
+// Set up the scene, camera, and renderer
+const scene = new THREE.Scene();
+const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+
+const renderer = initRenderer(scene, camera);
+initWorld();
+notifySceneReady();
+
+// Create and apply the skybox
+createSkybox(scene, renderer);
+
+// Add ambient light
+const ambientLight = new THREE.AmbientLight(0x404040);
+scene.add(ambientLight);
+
+// Add directional light
+const directionalLight = new THREE.DirectionalLight(0xffffff, 0.5);
+directionalLight.position.set(1, 1, 1);
+scene.add(directionalLight);
+
+// Initialize the player
+Player.init(camera, scene);
+
+
+// Prevent default right-click behavior
+document.addEventListener('contextmenu', (event) => event.preventDefault());
+
+// Animation loop
+let gameStarted = false;
+
+function animate() {
+    requestAnimationFrame(animate);
+    
+    if (!gameStarted) {
+        if (initializationComplete) {
+            gameStarted = true;
+        }
+        return;
+    }
+    
+    Player.update(getBlock);
+    updateChunks(Player.getPosition());
+    
+    // Update camera matrix for frustum culling
+    camera.updateMatrixWorld();
+    
+    // Force render even if no changes
+    render(scene, camera);
+}
+
+animate();
+
+// Handle window resizing
+window.addEventListener('resize', () => {
+    camera.aspect = window.innerWidth / window.innerHeight;
+    camera.updateProjectionMatrix();
+    renderer.setSize(window.innerWidth, window.innerHeight);
+}, false);
+
+updateBlockSelector();
+
+// Make necessary functions and variables available globally
+window.setBlock = setBlock;
+window.getBlock = getBlock;
+window.CHUNK_HEIGHT = CHUNK_HEIGHT;
+
+================================================================================
+File: ./scripts/player.js
+================================================================================
+
+import { CHUNK_HEIGHT, CHUNK_SIZE } from './constants.js';
+import { getBlock, updateBlock, chunks, addToLoadQueue, spawnPoint } from "./world.js";
+import { updateBlockSelector } from "./utils.js";
+import { chunkMeshes } from "./renderer.js";
+
+// Player module
+const Player = (function () {
+    // Player constants
+    const NORMAL_SPEED = 8; // Units per second
+    const SPRINT_SPEED = NORMAL_SPEED * 1.4;
+    const SWIM_SPEED = 1.5; // Units per second
+    const JUMP_FORCE = 8; // Units per second
+    const GRAVITY = 20; // Units per second squared
+    const WATER_GRAVITY = 4; // Units per second squared
+    const PLAYER_WIDTH = 1.2;
+    const PLAYER_HEIGHT = 3.6;
+    const HALF_WIDTH = PLAYER_WIDTH / 2;
+    const HALF_DEPTH = HALF_WIDTH; // Assuming square base
+    const COLLISION_OFFSETS = [
+        // Lower layer (y = 0)
+        [-HALF_WIDTH, 0, -HALF_DEPTH],
+        [HALF_WIDTH, 0, -HALF_DEPTH],
+        [-HALF_WIDTH, 0, HALF_DEPTH],
+        [HALF_WIDTH, 0, HALF_DEPTH],
+        
+        // Upper layer (y = PLAYER_HEIGHT)
+        [-HALF_WIDTH, PLAYER_HEIGHT, -HALF_DEPTH],
+        [HALF_WIDTH, PLAYER_HEIGHT, -HALF_DEPTH],
+        [-HALF_WIDTH, PLAYER_HEIGHT, HALF_DEPTH],
+        [HALF_WIDTH, PLAYER_HEIGHT, HALF_DEPTH]
+    ];
+    const EYE_HEIGHT = 3.2;
+    const STEP_HEIGHT = 1.0; // Maximum height of a step the player can automatically climb
+
+
+    // Player state
+    let isFlying = false;
+    let isSprinting = false;
+    let isSwimming = false;
+    let velocity = new THREE.Vector3();
+    let canJump = false;
+    let selectedBlockType = 1;
+
+    // Player objects
+    let pitchObject, yawObject, raycaster, camera;
+
+    // Input state
+    const keys = {};
+
+    // Time tracking
+    let lastTime = performance.now();
+
+    function init(cam, scene) {
+        camera = cam;
+        pitchObject = new THREE.Object3D();
+        pitchObject.position.y = EYE_HEIGHT;
+        pitchObject.add(camera);
+
+        yawObject = new THREE.Object3D();
+
+        // Set initial position to spawn point with Y above terrain
+        yawObject.position.set(
+            spawnPoint.x,
+            CHUNK_HEIGHT, // Set Y to maximum chunk height
+            spawnPoint.z
+        );
+
+        yawObject.add(pitchObject);
+        scene.add(yawObject);
+
+        raycaster = new THREE.Raycaster();
+        setupEventListeners();
+        setupPointerLock();
+    }
+
+    function setupEventListeners() {
+        document.addEventListener('mousemove', onMouseMove, false);
+        document.addEventListener('mousedown', onMouseDown, false);
+        document.addEventListener('contextmenu', (event) => event.preventDefault());
+        document.addEventListener('keydown', onKeyDown);
+        document.addEventListener('keyup', onKeyUp);
+    }
+
+    function setupPointerLock() {
+        const canvas = document.querySelector('canvas');
+        canvas.addEventListener('click', () => {
+            canvas.requestPointerLock();
+        });
+
+        document.addEventListener('pointerlockchange', onPointerLockChange, false);
+    }
+
+    function onPointerLockChange() {
+        if (document.pointerLockElement === document.querySelector('canvas')) {
+            document.addEventListener('mousemove', onMouseMove, false);
+        } else {
+            document.removeEventListener('mousemove', onMouseMove, false);
+        }
+    }
+
+    const onMouseMove = (event) => {
+        const movementX = event.movementX || event.mozMovementX || event.webkitMovementX || 0;
+        const movementY = event.movementY || event.mozMovementY || event.webkitMovementY || 0;
+
+        yawObject.rotation.y -= movementX * 0.002;
+        pitchObject.rotation.x -= movementY * 0.002;
+        pitchObject.rotation.x = Math.max(-Math.PI / 2, Math.min(Math.PI / 2, pitchObject.rotation.x));
+    };
+
+    function onMouseDown(event) {
+        if (document.pointerLockElement !== document.querySelector('canvas')) return;
+
+        raycaster.setFromCamera(new THREE.Vector2(0, 0), camera);
+        const intersects = raycaster.intersectObjects(Object.values(chunkMeshes).flatMap(mesh => [mesh.solid, mesh.water]));
+
+        if (intersects.length > 0) {
+            const intersect = intersects[0];
+            const normal = intersect.face.normal;
+
+            if (event.button === 0) { // Left click: remove voxel
+                const position = new THREE.Vector3()
+                    .copy(intersect.point)
+                    .addScaledVector(normal, -0.5)
+                    .floor();
+                updateBlock(position.x, position.y, position.z, 0); // 0 for air
+            } else if (event.button === 2) { // Right click: add voxel
+                const position = new THREE.Vector3()
+                    .copy(intersect.point)
+                    .addScaledVector(normal, 0.5)
+                    .floor();
+                if (canPlaceBlockAt(position.x, position.y, position.z)) {
+                    updateBlock(position.x, position.y, position.z, selectedBlockType);
+                }
+            }
+        }
+    }
+
+    function canPlaceBlockAt(x, y, z) {
+        if (y < 0 || y >= CHUNK_HEIGHT) return false;
+
+        // Check if the block is inside or too close to the player
+        const playerPos = yawObject.position;
+        const dx = Math.abs(x - playerPos.x);
+        const dy = Math.abs(y - playerPos.y);
+        const dz = Math.abs(z - playerPos.z);
+
+        if (dx < PLAYER_WIDTH / 2 && dy < PLAYER_HEIGHT && dz < PLAYER_WIDTH / 2) {
+            return false;
+        }
+
+        // Check surrounding blocks
+        for (let ox = -1; ox <= 1; ox++) {
+            for (let oy = -1; oy <= 1; oy++) {
+                for (let oz = -1; oz <= 1; oz++) {
+                    if (ox === 0 && oy === 0 && oz === 0) continue; // Skip the block itself
+                    if (getBlock(x + ox, y + oy, z + oz) !== 0) {
+                        return true; // If there's at least one non-air block adjacent, we can place here
+                    }
+                }
+            }
+        }
+
+        return false; // Can't place if floating in air
+    }
+
+    function onKeyDown(event) {
+        keys[event.code] = true;
+        if (event.code === 'ShiftLeft') {
+            isSprinting = true;
+        }
+        if (event.code === 'KeyF') { // Toggle flying on 'F' press
+            isFlying = !isFlying;
+            velocity.set(0, 0, 0); // Reset velocity to stop any movement
+        }
+        const key = parseInt(event.key);
+        if (!isNaN(key) && key >= 0 && key <= 9) {
+            selectedBlockType = key;
+            updateBlockSelector();
+        }
+    }
+
+    function onKeyUp(event) {
+        keys[event.code] = false;
+        if (event.code === 'ShiftLeft') {
+            isSprinting = false;
+        }
+    }
+
+    function update() {
+        if (!yawObject) return;
+    
+        const currentTime = performance.now();
+        const deltaTime = (currentTime - lastTime) / 1000; // Convert to seconds
+        lastTime = currentTime;
+    
+        const direction = new THREE.Vector3();
+        const rotation = yawObject.rotation.y;
+    
+        if (keys['KeyW']) direction.z = -1;
+        if (keys['KeyS']) direction.z = 1;
+        if (keys['KeyA']) direction.x = -1;
+        if (keys['KeyD']) direction.x = 1;
+    
+        direction.applyAxisAngle(new THREE.Vector3(0, 1, 0), rotation);
+    
+        if (isFlying) {
+            // Flying movement logic
+            let flySpeed = isSprinting ? SPRINT_SPEED : NORMAL_SPEED;
+            flySpeed *= 2;
+    
+            // Get camera's forward and right vectors
+            const forward = new THREE.Vector3();
+            camera.getWorldDirection(forward);
+            forward.normalize();
+    
+            const right = new THREE.Vector3();
+            right.crossVectors(new THREE.Vector3(0, 1, 0), forward).normalize();
+    
+            const moveDirection = new THREE.Vector3();
+    
+            // Movement based on camera direction
+            if (keys['KeyW']) moveDirection.add(forward);
+            if (keys['KeyS']) moveDirection.sub(forward);
+            if (keys['KeyA']) moveDirection.add(right);
+            if (keys['KeyD']) moveDirection.sub(right);
+    
+            // Vertical movement
+            if (keys['Space']) moveDirection.y += 1;
+            if (keys['ShiftLeft']) moveDirection.y -= 1;
+    
+            if (moveDirection.length() > 0) {
+                moveDirection.normalize();
+            }
+    
+            const movement = moveDirection.multiplyScalar(flySpeed * deltaTime);
+            yawObject.position.add(movement);
+    
+            canJump = false; // Disable jumping while flying
+        } else {
+            // Original movement and physics (non-flying)
+            isSwimming = checkWaterCollision(yawObject.position.x, yawObject.position.y + EYE_HEIGHT / 2, yawObject.position.z);
+    
+            if (keys['Space']) {
+                if (isSwimming) {
+                    velocity.y = SWIM_SPEED; // Swim upwards
+                } else if (canJump) {
+                    velocity.y = JUMP_FORCE;
+                    canJump = false;
+                }
+            }
+    
+            // Apply gravity and vertical collision detection
+            velocity.y -= (isSwimming ? WATER_GRAVITY : GRAVITY) * deltaTime;
+            if (checkCollision(yawObject.position.x, yawObject.position.y + velocity.y * deltaTime, yawObject.position.z)) {
+                if (velocity.y < 0) {
+                    canJump = true;
+                }
+                velocity.y = 0;
+            }
+            yawObject.position.y += velocity.y * deltaTime;
+    
+            const currentSpeed = isSwimming ? SWIM_SPEED : (isSprinting ? SPRINT_SPEED : NORMAL_SPEED);
+    
+            // Horizontal movement and collision detection with auto-jump
+            const movement = direction.multiplyScalar(currentSpeed * deltaTime);
+            const newX = yawObject.position.x + movement.x;
+            const newZ = yawObject.position.z + movement.z;
+    
+            // Check for collision at the new position
+            if (checkCollision(newX, yawObject.position.y, newZ)) {
+                // Check if we can step up
+                if (!checkCollision(newX, yawObject.position.y + STEP_HEIGHT, newZ)) {
+                    // We can step up, so move the player up and forward
+                    yawObject.position.y += STEP_HEIGHT;
+                    yawObject.position.x = newX;
+                    yawObject.position.z = newZ;
+                } else {
+                    // We can't step up, so just stop horizontal movement
+                    if (!checkCollision(newX, yawObject.position.y, yawObject.position.z)) {
+                        yawObject.position.x = newX;
+                    }
+                    if (!checkCollision(yawObject.position.x, yawObject.position.y, newZ)) {
+                        yawObject.position.z = newZ;
+                    }
+                }
+            } else {
+                // No collision, move normally
+                yawObject.position.x = newX;
+                yawObject.position.z = newZ;
+            }
+        }
+    
+        // Static collision check to prevent being stuck in blocks (only when not flying)
+        if (!isFlying) {
+            let resolved = false;
+            while (checkCollision(yawObject.position.x, yawObject.position.y, yawObject.position.z)) {
+                yawObject.position.y += 0.1; // Move up incrementally
+                resolved = true;
+                if (yawObject.position.y >= CHUNK_HEIGHT) break; // Prevent infinite loop
+            }
+    
+            if (resolved) {
+                velocity.y = 0;
+                canJump = true;
+            }
+        }
+    
+        // Ensure player doesn't fall through the world
+        if (yawObject.position.y < -10) {
+            yawObject.position.set(0, 200, 0);
+            velocity.set(0, 0, 0);
+        }
+    }
+
+    function checkCollision(x, y, z) {
+        const minX = x - HALF_WIDTH;
+        const maxX = x + HALF_WIDTH;
+        const minY = y;
+        const maxY = y + PLAYER_HEIGHT;
+        const minZ = z - HALF_WIDTH;
+        const maxZ = z + HALF_WIDTH;
+    
+        const startX = Math.floor(minX);
+        const endX = Math.floor(maxX);
+        const startY = Math.floor(minY);
+        const endY = Math.floor(maxY);
+        const startZ = Math.floor(minZ);
+        const endZ = Math.floor(maxZ);
+    
+        for (let bx = startX; bx <= endX; bx++) {
+            for (let bz = startZ; bz <= endZ; bz++) {
+                for (let by = startY; by <= endY; by++) {
+                    const blockType = getBlockGlobal(bx, by, bz);
+                    if (blockType !== 0 && blockType !== 5) {
+                        return true; // Collision detected
+                    }
+                }
+            }
+        }
+        return false; // No collision
+    }
+
+    function checkWaterCollision(x, y, z) {
+        const blockType = getBlock(Math.floor(x), Math.floor(y), Math.floor(z));
+        return blockType === 5; // 5 is the water block type
+    }
+
+    function getPosition() {
+        return yawObject ? yawObject.position : null;
+    }
+
+    function getObject() {
+        return yawObject;
+    }
+
+    function getBlockGlobal(x, y, z) {
+        // Floor the coordinates to get integer block positions
+        const blockX = Math.floor(x);
+        const blockY = Math.floor(y);
+        const blockZ = Math.floor(z);
+    
+        const chunkX = Math.floor(blockX / CHUNK_SIZE);
+        const chunkZ = Math.floor(blockZ / CHUNK_SIZE);
+        const chunkKey = `${chunkX},${chunkZ}`;
+    
+        if (!chunks[chunkKey]) {
+            addToLoadQueue(chunkX, chunkZ, Infinity);
+            return 0;
+        }
+    
+        const localX = ((blockX % CHUNK_SIZE) + CHUNK_SIZE) % CHUNK_SIZE;
+        const localZ = ((blockZ % CHUNK_SIZE) + CHUNK_SIZE) % CHUNK_SIZE;
+        const localY = blockY;
+    
+        if (localY < 0) return 1; // Bedrock at bottom
+        if (localY >= CHUNK_HEIGHT) return 0; // Air above max height
+    
+        return chunks[chunkKey][localX + localZ * CHUNK_SIZE + localY * CHUNK_SIZE * CHUNK_SIZE] || 0;
+    }
+
+    return {
+        init,
+        update,
+        getPosition,
+        getObject,
+        checkCollision,
+        selectedBlockType
+    };
+})();
+
+// Export the Player module
+export default Player;
+
+================================================================================
+File: ./scripts/renderer.js
+================================================================================
+
+let renderer, camera;
+export let scene = new THREE.Scene(); 
+export const chunkMeshes = {};
+const pendingChunkUpdates = new Set();
+
+// FPS counter variables
+let fpsCounter;
+let frameCount = 0;
+let lastTime = performance.now();
+
+export function initRenderer(scn, cam) {
+    scene = scn;
+    camera = cam;
+    
+    renderer = new THREE.WebGLRenderer({
+        antialias: false,
+        powerPreference: "high-performance"
+    });
+    
+    renderer.shadowMap.enabled = true;
+    renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    document.body.appendChild(renderer.domElement);
+    
+    scene.fog = new THREE.Fog(0x619dde, 20, 300);  // Sky blue color, start fading at 20 units, fully faded at 500 units
+
+    createFPSCounter();
+
+    return renderer;
+}
+
+function createFPSCounter() {
+    fpsCounter = document.createElement('div');
+    fpsCounter.id = 'fps-counter';
+    fpsCounter.style.position = 'absolute';
+    fpsCounter.style.top = '10px';
+    fpsCounter.style.right = '10px';
+    fpsCounter.style.color = 'white';
+    fpsCounter.style.fontSize = '16px';
+    fpsCounter.style.fontFamily = 'Arial, sans-serif';
+    fpsCounter.style.textShadow = '1px 1px 1px black';
+    document.body.appendChild(fpsCounter);
+}
+
+export function updateFPSCounter() {
+    frameCount++;
+    const currentTime = performance.now();
+    
+    if (currentTime > lastTime + 1000) {
+        const fps = Math.round((frameCount * 1000) / (currentTime - lastTime));
+        fpsCounter.textContent = `FPS: ${fps}`;
+        frameCount = 0;
+        lastTime = currentTime;
+    }
+}
+
+export function removeChunkGeometry(chunkX, chunkZ) {
+    const chunkKey = `${chunkX},${chunkZ}`;
+    if (chunkMeshes[chunkKey]) {
+        // Dispose geometries and materials properly
+        [chunkMeshes[chunkKey].solid, chunkMeshes[chunkKey].water].forEach(mesh => {
+            scene.remove(mesh);
+            mesh.geometry.dispose();
+            mesh.material.dispose();
+        });
+        delete chunkMeshes[chunkKey];
+    }
+}
+
+export function createSkybox(scene, renderer) {
+    const loader = new THREE.TextureLoader();
+    loader.load(
+        'assets/sky.png',
+        (texture) => {
+            const rt = new THREE.WebGLCubeRenderTarget(texture.image.height);
+            rt.fromEquirectangularTexture(renderer, texture);
+            scene.background = rt.texture;
+            
+            // Set the fog color to match the sky color
+            const skyColor = new THREE.Color().setHSL(0.6, 1, 0.9);  // Adjust these values to match sky texture
+            scene.fog.color.copy(skyColor);
+        },
+        undefined,
+        (error) => {
+            console.error('An error occurred while loading the sky texture:', error);
+        }
+    );
+}
+
+
+const frustum = new THREE.Frustum();
+const projScreenMatrix = new THREE.Matrix4();
+
+export function render(scene, camera) {
+    camera.updateMatrixWorld();
+    projScreenMatrix.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse);
+    frustum.setFromProjectionMatrix(projScreenMatrix);
+
+    for (const chunkKey in chunkMeshes) {
+        const { solid, water } = chunkMeshes[chunkKey];
+        
+        if (solid.boundingSphere) {
+            solid.visible = frustum.intersectsSphere(solid.boundingSphere);
+        } else {
+            solid.visible = true; // If no bounding sphere, always render
+        }
+
+        if (water.boundingSphere) {
+            water.visible = frustum.intersectsSphere(water.boundingSphere);
+        } else {
+            water.visible = true; // If no bounding sphere, always render
+        }
+    }
+
+    renderer.render(scene, camera);
+    updateFPSCounter();
+
+}
+
+export function updateFog(timeOfDay) {
+    if (!scene.fog) return;
+
+    // Example: Adjust fog density based on time of day
+    const fogNear = 20 + Math.sin(timeOfDay * Math.PI * 2) * 10;  // Vary between 10 and 30
+    const fogFar = 500 + Math.sin(timeOfDay * Math.PI * 2) * 100;  // Vary between 400 and 600
+
+    scene.fog.near = fogNear;
+    scene.fog.far = fogFar;
+
+    // Optionally, adjust fog color
+    const hue = 0.6 + Math.sin(timeOfDay * Math.PI * 2) * 0.1;  // Vary hue slightly
+    const saturation = 0.5 + Math.sin(timeOfDay * Math.PI * 2) * 0.25;  // Vary saturation
+    const lightness = 0.5 + Math.sin(timeOfDay * Math.PI * 2) * 0.25;  // Vary lightness
+
+    scene.fog.color.setHSL(hue, saturation, lightness);
+}
+
+
+================================================================================
+File: ./scripts/utils.js
+================================================================================
+
+import { materials } from './world.js';
+import Player from './player.js';
+
+export function getRandomRotationMatrix() {
+    const angle = Math.random() * Math.PI * 2;
+    const cos = Math.cos(angle);
+    const sin = Math.sin(angle);
+    return [cos, -sin, sin, cos];
+}
+
+export function updateBlockSelector() {
+    const selector = document.getElementById('block-selector');
+    selector.innerHTML = Object.entries(materials).map(([type, material]) => `
+        <div class="block-item ${type == Player.selectedBlockType ? 'selected' : ''}">
+            <div class="block-color" style="background-color: #${material.color.toString(16).padStart(6, '0')}"></div>
+            <span>${type}: ${getBlockName(parseInt(type))}</span>
+        </div>
+    `).join('');
+}
+
+export function getBlockName(blockType) {
+    const blockNames = ['Air', 'Grass', 'Dirt', 'Stone', 'Sand', 'Water', 'Wood', 'Leaves', 'Slate', 'Limestone'];
+    return blockNames[blockType] || 'Unknown';
+}
+
+================================================================================
+File: ./scripts/world.js
+================================================================================
+
+import { CHUNK_SIZE, CHUNK_HEIGHT, WATER_LEVEL, RENDER_DISTANCE } from './constants.js';
+import { chunkMeshes, removeChunkGeometry, scene } from './renderer.js';
+
+// Chunk states and initialization flags
+const CHUNK_LOADING = 1;
+const CHUNK_LOADED = 2;
+let chunkWorker = null;
+let geometryWorker = null;
+let initializationComplete = false;
+let workerInitialized = false;
+let sceneReady = false;
+let initialChunkLoaded = false;
+export let spawnPoint = null;
+export const collisionGeometry = new Map();
+
+// Chunk storage and queues
+const chunks = {};
+const chunkStates = {};
+const chunkLoadQueue = [];
+const blockColors = new Map();
+
+let currentPlayerChunkX = 0;
+let currentPlayerChunkZ = 0;
+
+// Performance management
+const MAX_CHUNKS_PER_FRAME = 50;
+let frameBudget = 16; // Start with 16ms (~60fps)
+let lastFrameTime = performance.now();
+
+// Materials definition
+const materials = {
+    0: { color: 0x000000 }, // Air
+    1: { color: 0x6cc66c }, // Grass
+    2: { color: 0x997260 }, // Dirt
+    3: { color: 0x888888 }, // Stone
+    4: { color: 0xe3dda6 }, // Sand
+    5: { color: 0x6380ec }, // Water
+    6: { color: 0x7b6e65 }, // Wood
+    7: { color: 0x228B22 }, // Leaves
+    8: { color: 0x3b4044 }, // Slate
+    9: { color: 0xFFFFFF }  // Limestone
+};
+
+// Initialize world systems
+export function initWorld() {
+    console.log("[World] Initializing world system...");
+    const SEED = Math.random() * 1000000;
+    console.log(`[World] Using seed: ${SEED}`);
+
+    
+    addToLoadQueue(0, 0, 0);
+
+    // Generate initial spawn point at chunk (0,0)
+    spawnPoint = findSuitableSpawnPoint(0, 0);
+    console.log("Generated spawn point:", spawnPoint);
+
+    geometryWorker = new Worker(new URL('./geometryWorker.js', import.meta.url), { type: 'module' });
+    geometryWorker.postMessage({
+        type: 'init',
+        materials: materials,
+        seed: SEED
+    });
+
+    geometryWorker.onmessage = function(e) {
+        if (e.data.type === 'geometry_data') {
+            createChunkMeshes(e.data.chunkX, e.data.chunkZ, e.data.solid, e.data.water);
+        }
+    };
+
+    chunkWorker = new Worker(new URL('./chunksWorker.js', import.meta.url), {
+        type: 'module'
+    });
+    console.log("[World] Web Worker created");
+
+    chunkWorker.onmessage = function(e) {
+        if (e.data.type === 'init_complete') {
+            workerInitialized = true;
+            checkInitialization();
+            if (sceneReady) {
+                processChunkQueue();
+            }
+        } else if (e.data.type === 'chunk_data') {
+            const { chunkX, chunkZ, chunkData } = e.data;
+            const chunkKey = `${chunkX},${chunkZ}`;
+    
+            // 1. Clone the received buffer for main thread storage
+            const clonedBuffer = new ArrayBuffer(chunkData.byteLength);
+            new Int8Array(clonedBuffer).set(new Int8Array(chunkData));
+            
+            // 2. Store cloned buffer in chunks
+            chunks[chunkKey] = new Int8Array(clonedBuffer);
+            chunkStates[chunkKey] = CHUNK_LOADED;
+    
+            // 3. Prepare adjacent chunks with fresh buffers
+            const transferList = [chunkData]; // Transfer original buffer
+            const adjacentChunks = {};
+    
+            [[1,0], [-1,0], [0,1], [0,-1]].forEach(([dx, dz]) => {
+                const adjKey = `${chunkX + dx},${chunkZ + dz}`;
+                if (chunks[adjKey]) {
+                    // Clone adjacent chunk's buffer for transfer
+                    const adjClone = new ArrayBuffer(chunks[adjKey].buffer.byteLength);
+                    new Int8Array(adjClone).set(chunks[adjKey]);
+                    adjacentChunks[adjKey] = adjClone;
+                    transferList.push(adjClone);
+                }
+            });
+    
+            // 4. Send message with transferrable buffers
+            geometryWorker.postMessage({
+                type: 'process_chunk',
+                chunkX,
+                chunkZ,
+                chunkData: chunkData,
+                adjacentChunks
+            }, transferList);
+    
+            updateAdjacentChunks(chunkX, chunkZ);
+        }
+    };
+
+    console.log("[World] Sending worker init message");
+    chunkWorker.postMessage({
+        type: 'init',
+        seed: SEED
+    });
+}
+
+// scripts/world.js
+function createChunkMeshes(chunkX, chunkZ, solidData, waterData) {
+    const chunkKey = `${chunkX},${chunkZ}`;
+
+    // Remove existing meshes if they exist
+    if (chunkMeshes[chunkKey]) {
+        scene.remove(chunkMeshes[chunkKey].solid);
+        scene.remove(chunkMeshes[chunkKey].water);
+        chunkMeshes[chunkKey].solid.geometry.dispose();
+        chunkMeshes[chunkKey].water.geometry.dispose();
+    }
+
+    // Create materials with proper configuration
+    const solidMaterial = new THREE.MeshLambertMaterial({
+        vertexColors: true,
+        side: THREE.FrontSide, // Ensure front faces are rendered
+        transparent: false,
+        depthWrite: true
+    });
+    
+    const waterMaterial = new THREE.MeshStandardMaterial({
+        color: 0x6380ec,
+        transparent: true,
+        opacity: 0.7,
+        side: THREE.DoubleSide, // Water should be double-sided
+        metalness: 0.3,
+        roughness: 0.1
+    });
+
+    // Create geometries
+    const solidGeometry = createGeometryFromData(solidData);
+    const waterGeometry = createGeometryFromData(waterData);
+
+    // Create meshes
+    const solidMesh = new THREE.Mesh(solidGeometry, solidMaterial);
+    const waterMesh = new THREE.Mesh(waterGeometry, waterMaterial);
+
+    // Position meshes
+    const worldX = chunkX * CHUNK_SIZE;
+    const worldZ = chunkZ * CHUNK_SIZE;
+    solidMesh.position.set(worldX, 0, worldZ);
+    waterMesh.position.set(worldX, 0, worldZ);
+
+    // Add to scene
+    scene.add(solidMesh);
+    scene.add(waterMesh);
+
+    // Store references
+    chunkMeshes[chunkKey] = { solid: solidMesh, water: waterMesh };
+
+    // Enable shadows
+    solidMesh.castShadow = true;
+    solidMesh.receiveShadow = true;
+    waterMesh.receiveShadow = true;
+
+    console.log(`Created meshes for chunk`);
+}
+
+function createGeometryFromData(data) {
+    const geometry = new THREE.BufferGeometry();
+    
+    geometry.setAttribute('position', new THREE.BufferAttribute(data.positions, 3));
+    geometry.setAttribute('normal', new THREE.BufferAttribute(data.normals, 3));
+    
+    if (data.colors) {
+        geometry.setAttribute('color', new THREE.BufferAttribute(data.colors, 3));
+    }
+    
+    geometry.setIndex(new THREE.BufferAttribute(data.indices, 1));
+    geometry.computeBoundingSphere();
+    
+    return geometry;
+}
+
+// Notify when scene is ready
+export function notifySceneReady() {
+    sceneReady = true;
+    console.log("[World] Scene ready:", sceneReady);
+    checkInitialization();
+}
+
+function checkInitialization() {
+    if (workerInitialized && sceneReady) {
+        initializationComplete = true;
+        console.log("[World] Full initialization complete");
+        // Start initial chunk processing
+        processChunkQueue();
+    }
+}
+
+function updateAdjacentChunks(chunkX, chunkZ) {
+    const neighbors = [
+        [chunkX + 1, chunkZ],
+        [chunkX - 1, chunkZ],
+        [chunkX, chunkZ + 1],
+        [chunkX, chunkZ - 1]
+    ];
+
+    neighbors.forEach(([x, z]) => {
+        const key = `${x},${z}`;
+        if (chunks[key] && chunkStates[key] === CHUNK_LOADED) {
+            // Send existing adjacent chunks to geometry worker for mesh regeneration
+            sendChunkToGeometryWorker(x, z);
+        }
+    });
+}
+
+function addToLoadQueue(x, z, priority = Infinity) {
+    const chunkKey = `${x},${z}`;
+    const dx = x - currentPlayerChunkX;
+    const dz = z - currentPlayerChunkZ;
+    
+    // Skip if out of bounds
+    if (Math.abs(dx) > RENDER_DISTANCE + 1 || Math.abs(dz) > RENDER_DISTANCE + 1) return;
+    
+    // Calculate priority based on distance
+    const distanceSq = dx * dx + dz * dz;
+    const existing = chunkLoadQueue.find(c => c.x === x && c.z === z);
+    
+    if (existing) {
+        // Update priority if new request is more urgent
+        if (priority < existing.priority) {
+            existing.priority = priority;
+            existing.distanceSq = distanceSq;
+        }
+        return;
+    }
+    
+    chunkLoadQueue.push({
+        x, z,
+        priority: Math.min(priority, distanceSq),
+        distanceSq
+    });
+    
+    // Keep the queue sorted by priority then distance
+    chunkLoadQueue.sort((a, b) => {
+        if (a.priority !== b.priority) return a.priority - b.priority;
+        return a.distanceSq - b.distanceSq;
+    });
+}
+
+function processChunkQueue() {
+    if (!workerInitialized || !sceneReady) return;
+
+    // Calculate time since last frame and adjust budget
+    const now = performance.now();
+    const timeSinceLastFrame = now - lastFrameTime;
+    lastFrameTime = now;
+
+    // Adjust frame budget based on actual frame time
+    if (timeSinceLastFrame < 16) {
+        frameBudget += 16 - timeSinceLastFrame; // We have extra time
+    } else {
+        frameBudget -= timeSinceLastFrame - 16; // We're running behind
+    }
+    
+    // Keep frame budget within reasonable bounds
+    frameBudget = Math.max(8, Math.min(32, frameBudget));
+
+    const startTime = performance.now();
+    let processed = 0;
+    
+    while (chunkLoadQueue.length > 0 && processed < MAX_CHUNKS_PER_FRAME) {
+        const { x, z } = chunkLoadQueue.shift();
+        const chunkKey = `${x},${z}`;
+        
+        if (!chunks[chunkKey] && chunkStates[chunkKey] !== CHUNK_LOADING) {
+            chunkStates[chunkKey] = CHUNK_LOADING;
+            chunkWorker.postMessage({ chunkX: x, chunkZ: z });
+            processed++;
+        }
+        
+        // Check if we've exceeded our frame budget
+        if (performance.now() - startTime > frameBudget) break;
+    }
+    
+    // If there are still chunks to process, schedule next frame
+    if (chunkLoadQueue.length > 0) {
+        requestAnimationFrame(processChunkQueue);
+    }
+}
+
+function getBlock(x, y, z) {
+    const chunkX = Math.floor(x / CHUNK_SIZE);
+    const chunkZ = Math.floor(z / CHUNK_SIZE);
+    const chunkKey = `${chunkX},${chunkZ}`;
+
+    if (!chunks[chunkKey]) {
+        if (chunkStates[chunkKey] !== CHUNK_LOADING) {
+            addToLoadQueue(chunkX, chunkZ, Infinity);
+        }
+        return 0;
+    }
+
+    const localX = ((x % CHUNK_SIZE) + CHUNK_SIZE) % CHUNK_SIZE;
+    const localZ = ((z % CHUNK_SIZE) + CHUNK_SIZE) % CHUNK_SIZE;
+
+    if (y < 0 || y >= CHUNK_HEIGHT) return 0;
+
+    return chunks[chunkKey][localX + localZ * CHUNK_SIZE + y * CHUNK_SIZE * CHUNK_SIZE] || 0;
+}
+
+function setBlock(x, y, z, type) {
+    const chunkX = Math.floor(x / CHUNK_SIZE);
+    const chunkZ = Math.floor(z / CHUNK_SIZE);
+    const chunkKey = `${chunkX},${chunkZ}`;
+
+    if (!chunks[chunkKey]) {
+        if (chunkStates[chunkKey] !== CHUNK_LOADING) {
+            addToLoadQueue(chunkX, chunkZ, Infinity);
+        }
+        return;
+    }
+
+    const localX = ((x % CHUNK_SIZE) + CHUNK_SIZE) % CHUNK_SIZE;
+    const localZ = ((z % CHUNK_SIZE) + CHUNK_SIZE) % CHUNK_SIZE;
+
+    if (y < 0 || y >= CHUNK_HEIGHT) return;
+
+    chunks[chunkKey][localX + localZ * CHUNK_SIZE + y * CHUNK_SIZE * CHUNK_SIZE] = type;
+    addToLoadQueue(chunkX, chunkZ, 0);
+}
+
+function updateBlock(x, y, z, newBlockType) {
+    const chunkX = Math.floor(x / CHUNK_SIZE);
+    const chunkZ = Math.floor(z / CHUNK_SIZE);
+    const localX = ((x % CHUNK_SIZE) + CHUNK_SIZE) % CHUNK_SIZE;
+    const localZ = ((z % CHUNK_SIZE) + CHUNK_SIZE) % CHUNK_SIZE;
+
+    const chunkKey = `${chunkX},${chunkZ}`;
+    if (!chunks[chunkKey]) return;
+
+    const index = localX + localZ * CHUNK_SIZE + y * CHUNK_SIZE * CHUNK_SIZE;
+    chunks[chunkKey][index] = newBlockType;
+
+    addToLoadQueue(chunkX, chunkZ, 0);
+    sendChunkToGeometryWorker(chunkX, chunkZ);
+
+    if (localX === 0) sendChunkToGeometryWorker(chunkX - 1, chunkZ);
+    if (localX === CHUNK_SIZE - 1) sendChunkToGeometryWorker(chunkX + 1, chunkZ);
+    if (localZ === 0) sendChunkToGeometryWorker(chunkX, chunkZ - 1);
+    if (localZ === CHUNK_SIZE - 1) sendChunkToGeometryWorker(chunkX, chunkZ + 1);
+}
+
+function sendChunkToGeometryWorker(chunkX, chunkZ) {
+    const chunkKey = `${chunkX},${chunkZ}`;
+    if (!chunks[chunkKey]) return;
+
+    const chunkData = chunks[chunkKey];
+    const clonedChunkData = new Int8Array(chunkData).buffer;
+
+    const adjacentChunks = {};
+    [[1,0], [-1,0], [0,1], [0,-1]].forEach(([dx, dz]) => {
+        const adjChunkX = chunkX + dx;
+        const adjChunkZ = chunkZ + dz;
+        const adjKey = `${adjChunkX},${adjChunkZ}`;
+        if (chunks[adjKey]) {
+            const adjClone = new Int8Array(chunks[adjKey]).buffer;
+            adjacentChunks[adjKey] = adjClone;
+        }
+    });
+
+    const transferList = [clonedChunkData];
+    Object.values(adjacentChunks).forEach(buffer => transferList.push(buffer));
+
+    geometryWorker.postMessage({
+        type: 'process_chunk',
+        chunkX,
+        chunkZ,
+        chunkData: clonedChunkData,
+        adjacentChunks
+    }, transferList);
+}
+
+function updateChunks(playerPosition) {
+    if (!playerPosition || !initializationComplete) return;
+
+    // Update player chunk position
+    currentPlayerChunkX = Math.floor(playerPosition.x / CHUNK_SIZE);
+    currentPlayerChunkZ = Math.floor(playerPosition.z / CHUNK_SIZE);
+
+    const chunksToKeep = new Set();
+    const buffer = RENDER_DISTANCE + 1;
+
+    // First pass: Collect all chunks in rectangular area
+    const chunksToCheck = [];
+    for (let dx = -buffer; dx <= buffer; dx++) {
+        for (let dz = -buffer; dz <= buffer; dz++) {
+            const x = currentPlayerChunkX + dx;
+            const z = currentPlayerChunkZ + dz;
+            chunksToCheck.push({ x, z });
+            chunksToKeep.add(`${x},${z}`);
+        }
+    }
+
+    // Sort chunks by distance to player
+    chunksToCheck.sort((a, b) => {
+        const aDx = a.x - currentPlayerChunkX;
+        const aDz = a.z - currentPlayerChunkZ;
+        const bDx = b.x - currentPlayerChunkX;
+        const bDz = b.z - currentPlayerChunkZ;
+        return (aDx * aDx + aDz * aDz) - (bDx * bDx + bDz * bDz);
+    });
+
+    // Add chunks to queue in sorted order
+    chunksToCheck.forEach(({ x, z }) => addToLoadQueue(x, z));
+
+    // Remove out-of-range chunks
+    Object.keys(chunkMeshes).forEach(chunkKey => {
+        if (!chunksToKeep.has(chunkKey)) {
+            const [x, z] = chunkKey.split(',').map(Number);
+            const dx = x - currentPlayerChunkX;
+            const dz = z - currentPlayerChunkZ;
+            
+            if (Math.abs(dx) > buffer || Math.abs(dz) > buffer) {
+                removeChunkGeometry(x, z);
+                cleanupChunkData(chunkKey);
+            }
+        }
+    });
+
+    processChunkQueue();
+}
+
+// New cleanup function in world.js
+function cleanupChunkData(chunkKey) {
+    // Clear chunk data
+    delete chunks[chunkKey];
+    delete chunkStates[chunkKey];
+}
+
+function findSuitableSpawnPoint(chunkX, chunkZ) {
+    const chunkKey = `${chunkX},${chunkZ}`;
+    if (!chunks[chunkKey]) {
+        // Changed from Infinity to 0 for highest priority
+        addToLoadQueue(chunkX, chunkZ, 0); 
+        return { x: chunkX * CHUNK_SIZE + CHUNK_SIZE / 2, 
+                 y: CHUNK_HEIGHT, // Start at top
+                 z: chunkZ * CHUNK_SIZE + CHUNK_SIZE / 2 };
+    }
+
+    const centerX = Math.floor(CHUNK_SIZE / 2);
+    const centerZ = Math.floor(CHUNK_SIZE / 2);
+    let spawnY = 0;
+
+    for (let y = CHUNK_HEIGHT - 1; y >= 0; y--) {
+        if (chunks[chunkKey][centerX + centerZ * CHUNK_SIZE + y * CHUNK_SIZE * CHUNK_SIZE] !== 0) {
+            spawnY = y + 2;
+            break;
+        }
+    }
+
+    if (spawnY <= WATER_LEVEL) {
+        spawnY = WATER_LEVEL + 2;
+    }
+
+    return {
+        x: chunkX * CHUNK_SIZE + centerX,
+        y: spawnY,
+        z: chunkZ * CHUNK_SIZE + centerZ
+    };
+}
+
+export {
+    updateChunks,
+    setBlock,
+    getBlock,
+    chunks,
+    materials,
+    blockColors,
+    updateBlock,
+    findSuitableSpawnPoint,
+    addToLoadQueue,
+    initializationComplete,
+};
+
+================================================================================
+File: ./index.html
+================================================================================
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Webcraft</title>
+    <link rel="stylesheet" href="styles/main.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+</head>
+<body>
+    <div id="cursor"></div>
+    <div id="block-selector"></div>
+    <script type="module" src="scripts/utils.js"></script>
+    <script type="module" src="scripts/world.js"></script>
+    <script type="module" src="scripts/player.js"></script>
+    <script type="module" src="scripts/renderer.js"></script>
+    <script type="module" src="scripts/main.js"></script>
+</body>
+</html>
+
+================================================================================
+File: ./scripts/chunksWorker.js
+================================================================================
+
+import SimplexNoise from 'https://cdn.jsdelivr.net/npm/simplex-noise@3.0.0/+esm';
+
+const CHUNK_SIZE = 8;
+const CHUNK_HEIGHT = 100;
+const WATER_LEVEL = 24;
+const BEACH_LEVEL = WATER_LEVEL + 2;
+
+const BIOME_TYPES = {
+    PLAINS: 0,
+    FOREST: 1,
+    DENSE_FOREST: 2,
+    ROCKY: 3,
+    BARREN: 4
+};
+
+// Create a seedable random generator
+function createPRNG(seed) {
+    return function() {
+        seed = (seed * 9301 + 49297) % 233280;
+        return seed / 233280;
+    };
+}
+
+let simplex;
+let featureNoise;
+let biomeNoise;
+let grassDirtNoise;
+
+self.onmessage = function(e) {
+    if (e.data.type === 'init') {
+        console.log("[Worker] Received init message");
+        const seed = e.data.seed;
+        // Initialize noise generators with the seed
+        simplex = new SimplexNoise({ 
+            random: createPRNG(seed)
+        });
+        featureNoise = new SimplexNoise({
+            random: createPRNG(seed + 1)
+        });
+        biomeNoise = new SimplexNoise({
+            random: createPRNG(seed + 2)
+        });
+        grassDirtNoise = new SimplexNoise({
+            random: createPRNG(seed + 3)
+        });
+        console.log("[Worker] Noise generators initialized");
+        // Notify main thread that initialization is complete
+        self.postMessage({ type: 'init_complete' });
+    } else {
+        const { chunkX, chunkZ } = e.data;
+        if (!simplex) {
+            console.error("[Worker] Noise generators not initialized!");
+            self.postMessage({ 
+                type: 'error',
+                message: "Noise generators not initialized",
+                chunkX,
+                chunkZ
+            });
+            return;
+        }
+        try {
+            const chunk = generateChunk(chunkX, chunkZ);
+            self.postMessage({
+                type: 'chunk_data',
+                chunkX,
+                chunkZ,
+                chunkData: chunk.buffer
+            }, [chunk.buffer]);
+        } catch (error) {
+            console.error(`[Worker] Error generating chunk (${chunkX},${chunkZ}):`, error);
+            self.postMessage({
+                type: 'error',
+                message: error.message,
+                chunkX,
+                chunkZ
+            });
+        }
+    }
+};
+
+function getBiomeAt(x, z) {
+    const biomeValue = biomeNoise.noise2D(x * 0.005, z * 0.005);
+    if (biomeValue < -0.6) return BIOME_TYPES.BARREN;
+    if (biomeValue < -0.2) return BIOME_TYPES.ROCKY;
+    if (biomeValue < 0.2) return BIOME_TYPES.PLAINS;
+    if (biomeValue < 0.6) return BIOME_TYPES.FOREST;
+    return BIOME_TYPES.DENSE_FOREST;
+}
+
+function generateChunk(chunkX, chunkZ) {
+    const chunk = new Int8Array(CHUNK_SIZE * CHUNK_SIZE * CHUNK_HEIGHT);
+
+    for (let x = 0; x < CHUNK_SIZE; x++) {
+        for (let z = 0; z < CHUNK_SIZE; z++) {
+            const worldX = chunkX * CHUNK_SIZE + x;
+            const worldZ = chunkZ * CHUNK_SIZE + z;
+
+            // Get noise values from initialized generators
+            const baseHeight = (simplex.noise2D(worldX * 0.0025, worldZ * 0.0025) + 1) * 0.8;
+            const detailHeight = (simplex.noise2D(worldX * 0.01, worldZ * 0.01) + 1) * 0.5;
+            const height = Math.floor((baseHeight * 0.8 + detailHeight * 0.2) * (CHUNK_HEIGHT - WATER_LEVEL));
+
+            // Use 3D noise for vertical variations
+            const slateNoise = simplex.noise3D(worldX * 0.025, 0, worldZ * 0.025);
+            const limestoneNoise = simplex.noise3D(worldX * 0.025, 100, worldZ * 0.025);
+
+            const biome = getBiomeAt(worldX, worldZ);
+            const grassDirtValue = grassDirtNoise.noise3D(worldX * 0.1, worldZ * 0.1, biome * 10);
+
+            for (let y = 0; y < CHUNK_HEIGHT; y++) {
+                let blockType;
+
+                if (y < height) {
+                    if (y < height - 5) {
+                        blockType = 3; // Stone
+                        if (y < CHUNK_HEIGHT / 2) {
+                            if (slateNoise > 0.3 && Math.random() < 0.7) blockType = 8; // Slate
+                        } else {
+                            if (limestoneNoise > 0.3 && Math.random() < 0.7) blockType = 9; // Limestone
+                        }
+                    } else if (y < height - 1) {
+                        blockType = 2; // Dirt
+                    } else {
+                        if (y <= BEACH_LEVEL) {
+                            blockType = 4; // Sand
+                        } else {
+                            const grassProbability = biome === BIOME_TYPES.BARREN ? 0.2 : 0.8;
+                            blockType = (grassDirtValue < grassProbability) ? 1 : 2;
+                        }
+                    }
+                } else if (y <= WATER_LEVEL) {
+                    blockType = 5; // Water
+                } else {
+                    blockType = 0; // Air
+                }
+
+                chunk[x + z * CHUNK_SIZE + y * CHUNK_SIZE * CHUNK_SIZE] = blockType;
+            }
+        }
+    }
+
+    const chunkFeatures = [];
+    for (let dx = -1; dx <= 1; dx++) {
+        for (let dz = -1; dz <= 1; dz++) {
+            const features = generateChunkFeatures(chunkX + dx, chunkZ + dz);
+            features.forEach(feature => {
+                // Directly use the feature's world coordinates
+                chunkFeatures.push(feature);
+            });
+        }
+    }
+
+    chunkFeatures.forEach(feature => {
+        const { worldX, worldZ, type } = feature;
+        // Only process features that intersect with this chunk (check if any part is within bounds)
+        const minX = worldX - 16; // Assuming max feature radius of 16
+        const maxX = worldX + 16;
+        const minZ = worldZ - 16;
+        const maxZ = worldZ + 16;
+        const chunkWorldMinX = chunkX * CHUNK_SIZE;
+        const chunkWorldMaxX = (chunkX + 1) * CHUNK_SIZE;
+        const chunkWorldMinZ = chunkZ * CHUNK_SIZE;
+        const chunkWorldMaxZ = (chunkZ + 1) * CHUNK_SIZE;
+
+        if (maxX >= chunkWorldMinX && minX < chunkWorldMaxX && maxZ >= chunkWorldMinZ && minZ < chunkWorldMaxZ) {
+            const baseHeight = getHeightAtWorld(worldX, worldZ);
+            if (baseHeight > WATER_LEVEL && baseHeight < CHUNK_HEIGHT - 1) {
+                switch (type) {
+                    case 'largeTree':
+                        generateLargeTree(chunk, chunkX, chunkZ, worldX, worldZ, baseHeight);
+                        break;
+                    case 'smallTree':
+                        generateSmallTree(chunk, chunkX, chunkZ, worldX, worldZ, baseHeight);
+                        break;
+                    case 'largeRock':
+                        generateLargeRockFormation(chunk, chunkX, chunkZ, worldX, worldZ, baseHeight);
+                        break;
+                    case 'bush':
+                        generateBush(chunk, chunkX, chunkZ, worldX, worldZ, baseHeight);
+                        break;
+                }
+            }
+        }
+    });
+
+    console.log('[Chunk Worker] Chunk Generated');
+
+
+    return chunk;
+}
+
+function generateChunkFeatures(chunkX, chunkZ) {
+    const features = [];
+    const worldStartX = chunkX * CHUNK_SIZE;
+    const worldStartZ = chunkZ * CHUNK_SIZE;
+
+    // Iterate over the chunk in steps of 3 to reduce density
+    for (let x = 0; x < CHUNK_SIZE; x += 3) {
+        for (let z = 0; z < CHUNK_SIZE; z += 3) {
+            const worldX = worldStartX + x;
+            const worldZ = worldStartZ + z;
+
+            // Get the biome at this world position
+            const biome = getBiomeAt(worldX, worldZ);
+
+            // Determine the feature type based on biome and noise
+            const featureValue = featureNoise.noise2D(worldX * 0.05, worldZ * 0.05);
+            let featureType = null;
+
+            switch (biome) {
+                case BIOME_TYPES.DENSE_FOREST:
+                    if (featureValue > 0.3) featureType = 'smallTree';
+                    else if (featureValue > -0.3) featureType = 'bush';
+                    break;
+                case BIOME_TYPES.FOREST:
+                    if (featureValue > 0.8) featureType = 'largeTree';
+                    else if (featureValue > 0.6) featureType = 'smallTree';
+                    else if (featureValue > -0.2) featureType = 'bush';
+                    break;
+                case BIOME_TYPES.PLAINS:
+                    if (featureValue > 0.8) featureType = 'largeTree';
+                    else if (featureValue > 0.5) featureType = 'bush';
+                    break;
+                case BIOME_TYPES.ROCKY:
+                    if (featureValue > 0.7) featureType = 'largeRock';
+                    break;
+                case BIOME_TYPES.BARREN:
+                    if (featureValue > 0.9) featureType = 'largeRock';
+                    break;
+            }
+
+            // If a feature type was determined, add it to the features array
+            if (featureType) {
+                features.push({
+                    type: featureType,
+                    worldX: worldX, // Store world coordinates
+                    worldZ: worldZ,
+                });
+            }
+        }
+    }
+
+    return features;
+}
+
+function generateLargeTree(chunk, chunkX, chunkZ, worldX, worldZ, baseHeight) {
+    const treeHeight = Math.floor(Math.random() * 10) + 15;
+    const trunkHeight = Math.floor(treeHeight * 0.7);
+    const leafRadius = Math.floor(treeHeight * 0.4) + 2;
+
+    // Convert world coordinates to local chunk coordinates
+    const localX = worldX - chunkX * CHUNK_SIZE;
+    const localZ = worldZ - chunkZ * CHUNK_SIZE;
+
+    // Check if trunk base is in this chunk
+    if (localX >= 0 && localX < CHUNK_SIZE && localZ >= 0 && localZ < CHUNK_SIZE) {
+        if (getBlockInChunk(chunk, localX, baseHeight, localZ) === 6) return;
+    }
+
+    // Generate trunk
+    for (let y = baseHeight; y < baseHeight + trunkHeight && y < CHUNK_HEIGHT; y++) {
+        // Main trunk
+        setBlockIfInChunk(chunk, chunkX, chunkZ, worldX, worldZ, y, 6);
+
+        // Thicken trunk
+        const directions = [
+            { dx: 1, dz: 0 }, { dx: -1, dz: 0 },
+            { dx: 0, dz: 1 }, { dx: 0, dz: -1 }
+        ];
+
+        directions.forEach(({ dx, dz }) => {
+            setBlockIfInChunk(chunk, chunkX, chunkZ, worldX + dx, worldZ + dz, y, 6);
+        });
+    }
+
+    // Generate leaves
+    for (let y = baseHeight + trunkHeight - 5; y <= baseHeight + treeHeight; y++) {
+        const layerRadius = leafRadius - Math.floor((y - (baseHeight + trunkHeight - 5)) / 3);
+
+        for (let dx = -layerRadius; dx <= layerRadius; dx++) {
+            for (let dz = -layerRadius; dz <= layerRadius; dz++) {
+                if (dx * dx + dz * dz <= layerRadius * layerRadius) {
+                    setBlockIfInChunk(
+                        chunk,
+                        chunkX,
+                        chunkZ,
+                        worldX + dx,
+                        worldZ + dz,
+                        y,
+                        7, // Leaves
+                        0.3 // 80% density
+                    );
+                }
+            }
+        }
+    }
+}
+
+function generateBush(chunk, chunkX, chunkZ, worldX, worldZ, baseHeight) {
+    const bushSize = Math.floor(Math.random() * 2) + 2;
+
+    for (let y = baseHeight; y < baseHeight + bushSize && y < CHUNK_HEIGHT; y++) {
+        for (let dx = -1; dx <= 1; dx++) {
+            for (let dz = -1; dz <= 1; dz++) {
+                if (Math.random() < 0.7) {
+                    setBlockIfInChunk(
+                        chunk,
+                        chunkX,
+                        chunkZ,
+                        worldX + dx,
+                        worldZ + dz,
+                        y,
+                        7 // Leaves
+                    );
+                }
+            }
+        }
+    }
+}
+
+function generateLargeRockFormation(chunk, chunkX, chunkZ, worldX, worldZ, baseHeight) {
+    const rockHeight = Math.floor(Math.random() * 4) + 2;
+    const rockRadius = Math.floor(rockHeight * 0.7) + 1;
+    const rockType = Math.random() < 0.5 ? 3 : 8; // Stone or Slate
+
+    for (let y = baseHeight; y < baseHeight + rockHeight && y < CHUNK_HEIGHT; y++) {
+        const layerRadius = Math.max(1, rockRadius - Math.floor((y - baseHeight) / 2));
+        for (let dx = -layerRadius; dx <= layerRadius; dx++) {
+            for (let dz = -layerRadius; dz <= layerRadius; dz++) {
+                if (dx * dx + dz * dz <= layerRadius * layerRadius * (0.7 + Math.random() * 0.3)) {
+                    setBlockIfInChunk(
+                        chunk,
+                        chunkX,
+                        chunkZ,
+                        worldX + dx,
+                        worldZ + dz,
+                        y,
+                        rockType
+                    );
+                }
+            }
+        }
+    }
+}
+
+function generateSmallTree(chunk, chunkX, chunkZ, worldX, worldZ, baseHeight) {
+    const treeHeight = Math.floor(Math.random() * 5) + 5;
+    const trunkHeight = Math.floor(treeHeight * 0.6);
+    const leafRadius = Math.floor(treeHeight * 0.5) + 1;
+
+    // Check if there's already a tree at this location in the current chunk
+    const localX = worldX - chunkX * CHUNK_SIZE;
+    const localZ = worldZ - chunkZ * CHUNK_SIZE;
+    if (localX >= 0 && localX < CHUNK_SIZE && localZ >= 0 && localZ < CHUNK_SIZE) {
+        if (getBlockInChunk(chunk, localX, baseHeight, localZ) === 6) return;
+    }
+
+    // Generate trunk
+    for (let y = baseHeight; y < baseHeight + trunkHeight && y < CHUNK_HEIGHT; y++) {
+        setBlockIfInChunk(chunk, chunkX, chunkZ, worldX, worldZ, y, 6); // Wood
+    }
+
+    // Generate leaves
+    for (let y = baseHeight + trunkHeight; y <= baseHeight + treeHeight && y < CHUNK_HEIGHT; y++) {
+        const layerRadius = leafRadius - Math.floor((y - (baseHeight + trunkHeight - 2)) / 3);
+        for (let dx = -layerRadius; dx <= layerRadius; dx++) {
+            for (let dz = -layerRadius; dz <= layerRadius; dz++) {
+                if (dx * dx + dz * dz <= layerRadius * layerRadius * (0.8 + Math.random() * 0.2)) {
+                    setBlockIfInChunk(
+                        chunk,
+                        chunkX,
+                        chunkZ,
+                        worldX + dx,
+                        worldZ + dz,
+                        y,
+                        7, // Leaves
+                        0.5 // 70% density
+                    );
+                }
+            }
+        }
+    }
+}
+
+function getBlockInChunk(chunk, x, y, z) {
+    if (x >= 0 && x < CHUNK_SIZE && z >= 0 && z < CHUNK_SIZE && y >= 0 && y < CHUNK_HEIGHT) {
+        return chunk[x + z * CHUNK_SIZE + y * CHUNK_SIZE * CHUNK_SIZE];
+    }
+    return 0; // Return air for out-of-bounds blocks
+}
+
+function getHeightAtWorld(worldX, worldZ) {
+    const baseHeight = (simplex.noise2D(worldX * 0.0025, worldZ * 0.0025) + 1) * 0.8;
+    const detailHeight = (simplex.noise2D(worldX * 0.01, worldZ * 0.01) + 1) * 0.5;
+    return Math.floor((baseHeight * 0.8 + detailHeight * 0.2) * (CHUNK_HEIGHT - WATER_LEVEL)); // Removed -20
+}
+
+function setBlockIfInChunk(chunk, chunkX, chunkZ, worldX, worldZ, y, type, density = 1.0) {
+    if (y < 0 || y >= CHUNK_HEIGHT) return;
+    if (Math.random() > density) return;
+
+    const localX = worldX - chunkX * CHUNK_SIZE;
+    const localZ = worldZ - chunkZ * CHUNK_SIZE;
+
+    if (localX >= 0 && localX < CHUNK_SIZE && localZ >= 0 && localZ < CHUNK_SIZE) {
+        chunk[localX + localZ * CHUNK_SIZE + y * CHUNK_SIZE * CHUNK_SIZE] = type;
+    }
+}
+
+export {
+    generateChunk,
+}
+
+================================================================================
+File: ./scripts/geometryWorker.js
+================================================================================
+
+import { CHUNK_SIZE, CHUNK_HEIGHT } from './constants.js';
+
+let materials = {};
+let seed = 0;
+let colorPRNG = null;
+
+function fastVariation(x, y, z) {
+    // Use more iterations of bit mixing to get better distribution
+    let seed = x * 3191 ^ y * 1337 ^ z * 7919;
+    
+    // Additional mixing steps
+    seed ^= seed << 13;
+    seed ^= seed >> 17;
+    seed ^= seed << 5;
+    seed ^= seed >> 7;
+    seed ^= seed << 11;
+    
+    // Get a more granular value by using more bits
+    return (seed & 0x3fffffff) / 0x3fffffff; // Using 30 bits instead of 31
+}
+
+function getBlockVariation(worldX, y, worldZ, blockType) {
+    const config = VARIATION_CONFIG[blockType] || {};
+    if (!config.scale) return [1, 1, 1];
+    
+    // Get unique variation per channel
+    const variations = [
+        fastVariation(
+            Math.floor(worldX/config.scale),
+            Math.floor(y/config.scale),
+            Math.floor(worldZ/config.scale)
+        ),
+        fastVariation(
+            Math.floor(worldX/config.scale) + 7919,
+            Math.floor(y/config.scale),
+            Math.floor(worldZ/config.scale)
+        ),
+        fastVariation(
+            Math.floor(worldX/config.scale),
+            Math.floor(y/config.scale) + 3191,
+            Math.floor(worldZ/config.scale)
+        )
+    ];
+
+    return variations.map((v, i) => 
+        1 + (v - 0.5) * config.intensity * (config.channelBias?.[i] || 1)
+    );
+}
+
+const VARIATION_CONFIG = {
+    1: { // Grass
+        scale: .2,     // Increase scale for more gradual changes
+        intensity: 0.08,
+        channelBias: [0.9, 1.1, 0.9]
+    },
+    2: { // Dirt
+        scale: .4,
+        intensity: 0.15,
+        channelBias: [1.0, 0.95, 0.9]
+    },
+    3: { // Stone
+        scale: .3,
+        intensity: 0.1,
+        channelBias: [1.0, 1.0, 1.0]
+    },
+    4: { // Sand
+        scale: 1,
+        intensity: 0.05,
+        channelBias: [1.1, 1.05, 0.95]
+    },
+    6: { // Wood
+        scale: 2.0,
+        intensity: 0.15,
+        channelBias: [0.95, 0.9, 0.85]
+    },
+    7: { // Leaves
+        scale: .1,
+        intensity: 0.4,
+        channelBias: [0.8, 1.2, 0.7]
+    },
+    8: { // Slate
+        scale: .3,
+        intensity: 0.15,
+        channelBias: [0.9, 0.95, 1.1]
+    },
+    9: { // Limestone
+        scale: .4,
+        intensity: 0.12,
+        channelBias: [1.0, 1.0, 1.0]
+    }
+};
+
+function createPRNG(seed) {
+    return function () {
+        seed = (seed * 9301 + 49297) % 233280;
+        return seed / 233280;
+    };
+}
+
+self.onmessage = function (e) {
+    switch (e.data.type) {
+        case 'init':
+            materials = e.data.materials;
+            seed = e.data.seed;
+            colorPRNG = createPRNG(seed);
+            break;
+
+        case 'process_chunk':
+            const { chunkX, chunkZ, chunkData, adjacentChunks } = e.data;
+            const result = generateGeometry(
+                chunkX,
+                chunkZ,
+                new Int8Array(chunkData),
+                adjacentChunks
+            );
+
+            self.postMessage({
+                type: 'geometry_data',
+                ...result
+            }, [
+                result.solid.positions.buffer,
+                result.solid.normals.buffer,
+                result.solid.colors.buffer,
+                result.solid.indices.buffer,
+                result.water.positions.buffer,
+                result.water.normals.buffer,
+                result.water.indices.buffer
+            ]);
+            break;
+    }
+};
+
+
+function generateGeometry(chunkX, chunkZ, chunkData, adjacentChunks) {
+    const solid = { positions: [], normals: [], colors: [], indices: [] };
+    const water = { positions: [], normals: [], indices: [] };
+
+    // Moved inside generateGeometry to access solid/water
+    const addFace = (isWater, normal, x, y, z, color) => {
+        const target = isWater ? water : solid;
+        const indexOffset = target.positions.length / 3;
+
+        // Define face vertices based on normal
+        const vertices = [];
+        if (normal[0] === 1) { // East
+            vertices.push([x, y, z], [x, y + 1, z], [x, y + 1, z + 1], [x, y, z + 1]);
+        } else if (normal[0] === -1) { // West
+            vertices.push([x, y, z + 1], [x, y + 1, z + 1], [x, y + 1, z], [x, y, z]);
+        } else if (normal[1] === 1) { // Top
+            vertices.push([x, y, z + 1], [x + 1, y, z + 1], [x + 1, y, z], [x, y, z]);
+        } else if (normal[1] === -1) { // Bottom
+            vertices.push([x, y, z], [x + 1, y, z], [x + 1, y, z + 1], [x, y, z + 1]);
+        } else if (normal[2] === 1) { // North
+            vertices.push([x + 1, y, z], [x + 1, y + 1, z], [x, y + 1, z], [x, y, z]);
+        } else { // South
+            vertices.push([x, y, z], [x, y + 1, z], [x + 1, y + 1, z], [x + 1, y, z]);
+        }
+
+        // Add vertices and normals
+        vertices.forEach(v => {
+            target.positions.push(...v);
+            target.normals.push(...normal);
+            if (!isWater) target.colors.push(...color);
+        });
+
+        // Add indices [0,1,2, 0,2,3]
+        target.indices.push(
+            indexOffset, indexOffset + 1, indexOffset + 2,
+            indexOffset, indexOffset + 2, indexOffset + 3
+        );
+    };
+
+    for (let x = 0; x < CHUNK_SIZE; x++) {
+        for (let y = 0; y < CHUNK_HEIGHT; y++) {
+            for (let z = 0; z < CHUNK_SIZE; z++) {
+                const blockType = chunkData[x + z * CHUNK_SIZE + y * CHUNK_SIZE * CHUNK_SIZE];
+                if (blockType === 0) continue;
+
+                // Get neighbor information first
+                const worldX = chunkX * CHUNK_SIZE + x;
+                const worldZ = chunkZ * CHUNK_SIZE + z;
+                
+                const neighbors = {
+                    px: getBlockInWorld(chunkX, chunkZ, x + 1, y, z, chunkData, adjacentChunks),
+                    nx: getBlockInWorld(chunkX, chunkZ, x - 1, y, z, chunkData, adjacentChunks),
+                    py: getBlockInWorld(chunkX, chunkZ, x, y + 1, z, chunkData, adjacentChunks),
+                    ny: getBlockInWorld(chunkX, chunkZ, x, y - 1, z, chunkData, adjacentChunks),
+                    pz: getBlockInWorld(chunkX, chunkZ, x, y, z + 1, chunkData, adjacentChunks),
+                    nz: getBlockInWorld(chunkX, chunkZ, x, y, z - 1, chunkData, adjacentChunks)
+                };
+
+                // Skip processing completely enclosed solid blocks
+                if (x > 0 && x < CHUNK_SIZE - 1 && 
+                    z > 0 && z < CHUNK_SIZE - 1 &&
+                    y > 0 && y < CHUNK_HEIGHT - 1) {
+                    if (!isTransparent(neighbors.px) && 
+                        !isTransparent(neighbors.nx) &&
+                        !isTransparent(neighbors.py) && 
+                        !isTransparent(neighbors.ny) &&
+                        !isTransparent(neighbors.pz) && 
+                        !isTransparent(neighbors.nz)) {
+                        continue;
+                    }
+                }
+
+                const isWater = blockType === 5;
+                const baseColor = hexToRGB(materials[blockType].color);
+                const colorMultipliers = getBlockVariation(worldX, y, worldZ, blockType);
+                const finalColor = baseColor.map((c, i) => 
+                    Math.min(1, Math.max(0, c * colorMultipliers[i]))
+                );
+
+                // Generate faces only if neighbor is transparent
+                if ((isWater && neighbors.px === 0) || (!isWater && isTransparent(neighbors.px)))
+                    addFace(isWater, [1, 0, 0], x + 1, y, z, finalColor);
+                if ((isWater && neighbors.nx === 0) || (!isWater && isTransparent(neighbors.nx)))
+                    addFace(isWater, [-1, 0, 0], x, y, z, finalColor);
+                if ((isWater && neighbors.py === 0) || (!isWater && isTransparent(neighbors.py)))
+                    addFace(isWater, [0, 1, 0], x, y + 1, z, finalColor);
+                if ((isWater && neighbors.ny === 0) || (!isWater && isTransparent(neighbors.ny)))
+                    addFace(isWater, [0, -1, 0], x, y, z, finalColor);
+                if ((isWater && neighbors.pz === 0) || (!isWater && isTransparent(neighbors.pz)))
+                    addFace(isWater, [0, 0, 1], x, y, z + 1, finalColor);
+                if ((isWater && neighbors.nz === 0) || (!isWater && isTransparent(neighbors.nz)))
+                    addFace(isWater, [0, 0, -1], x, y, z, finalColor);
+            }
+        }
+    }
+
+    return {
+        chunkX,
+        chunkZ,
+        solid: packageGeometry(solid),
+        water: packageGeometry(water)
+    };
+}
+
+function getBlockInWorld(currentChunkX, currentChunkZ, localX, localY, localZ, currentChunkData, adjacentChunks) {
+    // Handle Y bounds checking first
+    if (localY < 0 || localY >= CHUNK_HEIGHT) {
+        return 0; // Return air for out of bounds Y
+    }
+
+    // Calculate world coordinates
+    const worldX = currentChunkX * CHUNK_SIZE + localX;
+    const worldZ = currentChunkZ * CHUNK_SIZE + localZ;
+
+    // Calculate target chunk coordinates
+    const targetChunkX = Math.floor(worldX / CHUNK_SIZE);
+    const targetChunkZ = Math.floor(worldZ / CHUNK_SIZE);
+
+    // Calculate local coordinates within target chunk
+    const targetLocalX = ((worldX % CHUNK_SIZE) + CHUNK_SIZE) % CHUNK_SIZE;
+    const targetLocalZ = ((worldZ % CHUNK_SIZE) + CHUNK_SIZE) % CHUNK_SIZE;
+
+    // If we're in the current chunk, use current chunk data
+    if (targetChunkX === currentChunkX && targetChunkZ === currentChunkZ) {
+        return getBlock(currentChunkData, targetLocalX, localY, targetLocalZ);
+    }
+
+    // Otherwise, look for adjacent chunk data
+    const chunkKey = `${targetChunkX},${targetChunkZ}`;
+    if (adjacentChunks && adjacentChunks[chunkKey]) {
+        const adjChunkData = new Int8Array(adjacentChunks[chunkKey]);
+        return getBlock(adjChunkData, targetLocalX, localY, targetLocalZ);
+    }
+
+    // If we can't find the chunk data, return air
+    return 0;
+}
+
+// Helper functions
+function hexToRGB(hex) {
+    return [
+        ((hex >> 16) & 255) / 255,
+        ((hex >> 8) & 255) / 255,
+        (hex & 255) / 255
+    ];
+}
+
+function packageGeometry(geo) {
+    return {
+        positions: new Float32Array(geo.positions),
+        normals: new Float32Array(geo.normals),
+        colors: geo.colors ? new Float32Array(geo.colors) : null,
+        indices: new Uint32Array(geo.indices)
+    };
+}
+
+function getBlock(chunkData, x, y, z) {
+    if (x < 0 || x >= CHUNK_SIZE || z < 0 || z >= CHUNK_SIZE || y < 0 || y >= CHUNK_HEIGHT)
+        return 0;
+    return chunkData[x + z * CHUNK_SIZE + y * CHUNK_SIZE * CHUNK_SIZE];
+}
+
+function isTransparent(blockType) {
+    return blockType === 0 || blockType === 5;
+}
+
+export default self;
