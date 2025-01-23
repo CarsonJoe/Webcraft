@@ -299,7 +299,7 @@ function generateGeometry(chunkX, chunkZ, chunkData, adjacentChunks) {
                 if ((isWater && neighbors.nx === 0) || (!isWater && isTransparent(neighbors.nx)))
                     addFace(isWater, [-1, 0, 0], x, y, z, finalColor);
                 // Modified line for the top face (py) to check if the block above is transparent (air or water)
-                if (isTransparent(neighbors.py))
+                if ((isWater && neighbors.py === 0) || (!isWater && isTransparent(neighbors.py)))
                     addFace(isWater, [0, 1, 0], x, y, z, finalColor);
                 if ((isWater && neighbors.ny === 0) || (!isWater && isTransparent(neighbors.ny)))
                     addFace(isWater, [0, -1, 0], x, y, z, finalColor);
