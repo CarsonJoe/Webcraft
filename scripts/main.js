@@ -17,7 +17,7 @@ notifySceneReady();
 createSkybox(scene, renderer);
 
 // Add ambient light
-const ambientLight = new THREE.AmbientLight(0x404040);
+const ambientLight = new THREE.AmbientLight(0x404050);
 scene.add(ambientLight);
 
 // Add directional light
