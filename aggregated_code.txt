@@ -93,7 +93,9 @@ notifySceneReady();
 
 // Create and apply the skybox
 createSkybox(scene, renderer);
- 
+
+
+
 // Add ambient light
 const ambientLight = new THREE.AmbientLight(0x404050);
 scene.add(ambientLight);
@@ -102,6 +104,166 @@ scene.add(ambientLight);
 const directionalLight = new THREE.DirectionalLight(0xffffff, 0.5);
 directionalLight.position.set(1, 1, 1);
 scene.add(directionalLight);
+
+// Cloud setup
+import SimplexNoise from 'https://cdn.jsdelivr.net/npm/simplex-noise@3.0.0/+esm';
+
+// Generate tileable noise texture using toroidal mapping
+const CLOUD_TEX_SIZE = 512;
+const simplex = new SimplexNoise();
+
+// Toroidal noise parameters
+const NOISE_SCALE = 1.0;
+const TORUS_MAJOR_RADIUS = 2.0;
+const TORUS_MINOR_RADIUS = 1.0;
+
+const noiseData = new Uint8Array(CLOUD_TEX_SIZE * CLOUD_TEX_SIZE * 4);
+
+for (let x = 0; x < CLOUD_TEX_SIZE; x++) {
+    for (let y = 0; y < CLOUD_TEX_SIZE; y++) {
+        // Create toroidal coordinates for seamless wrapping
+        const theta = (x / CLOUD_TEX_SIZE) * Math.PI * 2;
+        const phi = (y / CLOUD_TEX_SIZE) * Math.PI * 2;
+
+        // Convert to 3D torus coordinates
+        const tx = (TORUS_MAJOR_RADIUS + TORUS_MINOR_RADIUS * Math.cos(theta)) * Math.cos(phi) * NOISE_SCALE;
+        const ty = (TORUS_MAJOR_RADIUS + TORUS_MINOR_RADIUS * Math.cos(theta)) * Math.sin(phi) * NOISE_SCALE;
+        const tz = TORUS_MINOR_RADIUS * Math.sin(theta) * NOISE_SCALE;
+
+        // Get 3D noise value
+        const value = simplex.noise3D(tx, ty, tz);
+
+        // Convert to 0-255 range
+        const normalized = (value + 1) * 127.5;
+        const idx = (y * CLOUD_TEX_SIZE + x) * 4;
+        noiseData[idx] = normalized;
+        noiseData[idx + 1] = normalized;
+        noiseData[idx + 2] = normalized;
+        noiseData[idx + 3] = 255;
+    }
+}
+
+const cloudTexture = new THREE.DataTexture(
+    noiseData,
+    CLOUD_TEX_SIZE,
+    CLOUD_TEX_SIZE,
+    THREE.RGBAFormat
+);
+cloudTexture.wrapS = THREE.RepeatWrapping;
+cloudTexture.wrapT = THREE.RepeatWrapping;
+cloudTexture.minFilter = THREE.LinearFilter;
+cloudTexture.magFilter = THREE.LinearFilter;
+cloudTexture.needsUpdate = true;
+// Cloud material
+const cloudMaterial = new THREE.ShaderMaterial({
+    uniforms: {
+        time: { value: 0 },
+        dayNightCycle: { value: 0.5 },
+        cloudTexture: { value: cloudTexture },
+        lightDirection: { value: directionalLight.position.normalize() },
+        cloudSpeed: { value: 0.0005 },  // Increased default speed
+        cloudCover: { value: 0.9 },  // Added cloud cover parameter
+        densityScale: { value: .5 }, // Adjusted default density
+        lightIntensity: { value: .5 }
+    },
+    vertexShader: `
+    varying vec2 vUv;
+    varying vec3 vWorldPosition;
+    void main() {
+      vUv = uv;
+      vWorldPosition = (modelMatrix * vec4(position, 1.0)).xyz;
+      gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+    }
+  `,
+    fragmentShader: `
+    uniform sampler2D cloudTexture;
+    uniform float time;
+    uniform float dayNightCycle;
+    uniform vec3 lightDirection;
+    uniform float cloudSpeed;
+    uniform float cloudCover;
+    uniform float densityScale;
+    varying vec2 vUv;
+    varying vec3 vWorldPosition;
+
+    #define OCTAVES 4
+
+    float fbm(vec2 uv) {
+        float value = 0.0;
+        float amplitude = 0.5;
+        float frequency = 1.0;
+        
+        for(int i = 0; i < OCTAVES; i++) {
+            vec2 sampleUV = uv * frequency + time * cloudSpeed;
+            float noise = texture2D(cloudTexture, sampleUV).r;
+            value += amplitude * noise;
+            amplitude *= 0.5;
+            frequency *= 2.0;
+        }
+        
+        return value;
+    }
+
+    float getCloudDensity(vec2 uv) {
+        // Animated UVs with speed control
+        vec2 uv1 = uv * 0.8 + vec2(time * cloudSpeed, 0.0);
+        vec2 uv2 = uv * 2.5 + vec2(0.0, time * cloudSpeed * 1.0);
+        vec2 uv3 = uv * 0.3 - vec2(time * cloudSpeed * 0.5);
+        
+        // Cloud layers
+        float baseClouds = fbm(uv1);
+        float details = fbm(uv2) * 0.3;
+        float largeScale = smoothstep(0.3, 0.8, fbm(uv3)) * 0.5;
+        
+        // Combine layers and apply density scale
+        float density = (baseClouds * largeScale + details) * densityScale;
+        
+        // Cloud cover control
+        float coverageThreshold = mix(0.3, -0.2, cloudCover);
+        density = smoothstep(coverageThreshold, coverageThreshold + 0.5, density);
+        
+        return clamp(density, 0.0, 1.0);
+    }
+
+    void main() {
+        vec2 uv = vUv * 2.0;
+        float density = getCloudDensity(uv);
+        
+        // Lighting calculations
+        vec3 normal = vec3(0.0, 1.0, 0.0);
+        float lightIntensity = dot(normal, lightDirection) * 0.5 + 0.5;
+        
+        // Color variations
+        vec3 baseColor = mix(vec3(0.4, 0.45, 0.5), vec3(1.0, 0.98, 0.95), density);
+        vec3 shadedColor = mix(baseColor * 0.7, baseColor * 1.2, lightIntensity);
+        vec3 ambientColor = mix(vec3(0.25, 0.3, 0.4), vec3(0.5, 0.6, 0.8), dayNightCycle);
+        
+        // Final color and opacity
+        vec3 finalColor = mix(ambientColor, shadedColor, density * 0.8);
+        float alpha = smoothstep(0.1, 0.9, density) * 0.8;
+        alpha *= mix(0.8, 1.2, fbm(uv * 5.0 + time * 0.1));
+        
+        gl_FragColor = vec4(finalColor, alpha * 0.85);
+    }
+  `,
+    transparent: true,
+    depthWrite: false,
+    side: THREE.DoubleSide
+});
+
+// Cloud plane
+const cloudGeometry = new THREE.PlaneGeometry(3000, 3000); // Increased size
+cloudGeometry.rotateX(-Math.PI / 2);
+const clouds = new THREE.Mesh(cloudGeometry, cloudMaterial);
+clouds.position.y = 180;
+clouds.renderOrder = -1; // Render before other objects
+scene.add(clouds);
+
+function updateCloudPosition() {
+    const playerPos = Player.getPosition();
+    clouds.position.x = playerPos.x;
+    clouds.position.z = playerPos.z;
+}
 
 // Initialize the player
 Player.init(camera, scene);
@@ -115,20 +277,25 @@ let gameStarted = false;
 
 function animate() {
     requestAnimationFrame(animate);
-    
+
     if (!gameStarted) {
         if (initializationComplete) {
             gameStarted = true;
         }
         return;
     }
-    
+
+    if (cloudMaterial) {
+        cloudMaterial.uniforms.time.value = performance.now() / 1000;
+    }
+
     Player.update(getBlock);
     updateChunks(Player.getPosition());
-    
+    updateCloudPosition();
+
     // Update camera matrix for frustum culling
     camera.updateMatrixWorld();
-    
+
     // Force render even if no changes
     render(scene, camera);
 }
@@ -1713,14 +1880,14 @@ let colorPRNG = null;
 function fastVariation(x, y, z) {
     // Use more iterations of bit mixing to get better distribution
     let seed = x * 3191 ^ y * 1337 ^ z * 7919;
-    
+
     // Additional mixing steps
     seed ^= seed << 13;
     seed ^= seed >> 17;
     seed ^= seed << 5;
     seed ^= seed >> 7;
     seed ^= seed << 11;
-    
+
     // Get a more granular value by using more bits
     return (seed & 0x3fffffff) / 0x3fffffff; // Using 30 bits instead of 31
 }
@@ -1728,27 +1895,27 @@ function fastVariation(x, y, z) {
 function getBlockVariation(worldX, y, worldZ, blockType) {
     const config = VARIATION_CONFIG[blockType] || {};
     if (!config.scale) return [1, 1, 1];
-    
+
     // Get unique variation per channel
     const variations = [
         fastVariation(
-            Math.floor(worldX/config.scale),
-            Math.floor(y/config.scale),
-            Math.floor(worldZ/config.scale)
+            Math.floor(worldX / config.scale),
+            Math.floor(y / config.scale),
+            Math.floor(worldZ / config.scale)
         ),
         fastVariation(
-            Math.floor(worldX/config.scale) + 7919,
-            Math.floor(y/config.scale),
-            Math.floor(worldZ/config.scale)
+            Math.floor(worldX / config.scale) + 7919,
+            Math.floor(y / config.scale),
+            Math.floor(worldZ / config.scale)
         ),
         fastVariation(
-            Math.floor(worldX/config.scale),
-            Math.floor(y/config.scale) + 3191,
-            Math.floor(worldZ/config.scale)
+            Math.floor(worldX / config.scale),
+            Math.floor(y / config.scale) + 3191,
+            Math.floor(worldZ / config.scale)
         )
     ];
 
-    return variations.map((v, i) => 
+    return variations.map((v, i) =>
         1 + (v - 0.5) * config.intensity * (config.channelBias?.[i] || 1)
     );
 }
@@ -1841,38 +2008,116 @@ function generateGeometry(chunkX, chunkZ, chunkData, adjacentChunks) {
     const solid = { positions: [], normals: [], colors: [], indices: [] };
     const water = { positions: [], normals: [], indices: [] };
 
-    // Moved inside generateGeometry to access solid/water
-    const addFace = (isWater, normal, x, y, z, color) => {
+    // Moved addFace inside generateGeometry and added AO calculations
+    const addFace = (isWater, normal, localX, localY, localZ, color) => {
         const target = isWater ? water : solid;
-        const indexOffset = target.positions.length / 3;
+
+        // Vertex positions in world coordinates
+        const positions = [];
+        let aoValues = [];
 
         // Define face vertices based on normal
-        const vertices = [];
         if (normal[0] === 1) { // East
-            vertices.push([x, y, z], [x, y + 1, z], [x, y + 1, z + 1], [x, y, z + 1]);
+            positions.push(
+                [localX + 1, localY, localZ],
+                [localX + 1, localY + 1, localZ],
+                [localX + 1, localY + 1, localZ + 1],
+                [localX + 1, localY, localZ + 1]
+            );
         } else if (normal[0] === -1) { // West
-            vertices.push([x, y, z + 1], [x, y + 1, z + 1], [x, y + 1, z], [x, y, z]);
+            positions.push(
+                [localX, localY, localZ + 1],
+                [localX, localY + 1, localZ + 1],
+                [localX, localY + 1, localZ],
+                [localX, localY, localZ]
+            );
         } else if (normal[1] === 1) { // Top
-            vertices.push([x, y, z + 1], [x + 1, y, z + 1], [x + 1, y, z], [x, y, z]);
+            positions.push(
+                [localX, localY + 1, localZ],
+                [localX, localY + 1, localZ + 1],
+                [localX + 1, localY + 1, localZ + 1],
+                [localX + 1, localY + 1, localZ]
+            );
         } else if (normal[1] === -1) { // Bottom
-            vertices.push([x, y, z], [x + 1, y, z], [x + 1, y, z + 1], [x, y, z + 1]);
+            positions.push(
+                [localX, localY, localZ],
+                [localX + 1, localY, localZ],
+                [localX + 1, localY, localZ + 1],
+                [localX, localY, localZ + 1]
+            );
         } else if (normal[2] === 1) { // North
-            vertices.push([x + 1, y, z], [x + 1, y + 1, z], [x, y + 1, z], [x, y, z]);
+            positions.push(
+                [localX + 1, localY, localZ + 1],
+                [localX + 1, localY + 1, localZ + 1],
+                [localX, localY + 1, localZ + 1],
+                [localX, localY, localZ + 1]
+            );
         } else { // South
-            vertices.push([x, y, z], [x, y + 1, z], [x + 1, y + 1, z], [x + 1, y, z]);
+            positions.push(
+                [localX, localY, localZ],
+                [localX, localY + 1, localZ],
+                [localX + 1, localY + 1, localZ],
+                [localX + 1, localY, localZ]
+            );
         }
 
-        // Add vertices and normals
-        vertices.forEach(v => {
-            target.positions.push(...v);
-            target.normals.push(...normal);
-            if (!isWater) target.colors.push(...color);
+        // Calculate ambient occlusion for each vertex
+        positions.forEach(pos => {
+            const [x, y, z] = pos;
+            let ao = 0;
+
+            // Check 3 adjacent blocks for occlusion
+            const checks = [];
+            if (normal[1] === 0) { // Vertical faces
+                checks.push(
+                    [x - normal[0], y, z - normal[2]],
+                    [x - normal[0], y - 1, z - normal[2]],
+                    [x, y - 1, z]
+                );
+            } else { // Horizontal faces
+                checks.push(
+                    [x - 1, y, z],
+                    [x, y, z - 1],
+                    [x - 1, y, z - 1]
+                );
+            }
+
+            checks.forEach(check => {
+                const [cx, cy, cz] = check;
+                if (getBlockInWorld(
+                    chunkX, chunkZ,
+                    Math.floor(cx),
+                    Math.floor(cy),
+                    Math.floor(cz),
+                    chunkData,
+                    adjacentChunks
+                ) !== 0) {
+                    ao += 0.3;
+                }
+            });
+
+            aoValues.push(Math.min(1, ao));
         });
 
-        // Add indices [0,1,2, 0,2,3]
+        // Add vertices with AO-adjusted colors
+        positions.forEach((pos, i) => {
+            target.positions.push(...pos);
+            target.normals.push(...normal);
+
+            if (!isWater) {
+                const ao = aoValues[i];
+                const darkened = color.map(c => c * (1 - ao * 0.45)); // AO intensity
+                target.colors.push(...darkened);
+            }
+        });
+
+        // Calculate starting vertex index for this face
+        const vertexCount = target.positions.length / 3;
+
+        // Add indices
         target.indices.push(
-            indexOffset, indexOffset + 1, indexOffset + 2,
-            indexOffset, indexOffset + 2, indexOffset + 3
+            vertexCount, vertexCount + 1, vertexCount + 2,
+            vertexCount, vertexCount + 2, vertexCount + 3
         );
     };
 
@@ -1885,7 +2130,7 @@ function generateGeometry(chunkX, chunkZ, chunkData, adjacentChunks) {
                 // Get neighbor information first
                 const worldX = chunkX * CHUNK_SIZE + x;
                 const worldZ = chunkZ * CHUNK_SIZE + z;
-                
+
                 const neighbors = {
                     px: getBlockInWorld(chunkX, chunkZ, x + 1, y, z, chunkData, adjacentChunks),
                     nx: getBlockInWorld(chunkX, chunkZ, x - 1, y, z, chunkData, adjacentChunks),
@@ -1896,37 +2141,42 @@ function generateGeometry(chunkX, chunkZ, chunkData, adjacentChunks) {
                 };
 
                 // Skip processing completely enclosed solid blocks
-                if (x > 0 && x < CHUNK_SIZE - 1 && 
+                if (x > 0 && x < CHUNK_SIZE - 1 &&
                     z > 0 && z < CHUNK_SIZE - 1 &&
                     y > 0 && y < CHUNK_HEIGHT - 1) {
-                    if (!isTransparent(neighbors.px) && 
+                    if (!isTransparent(neighbors.px) &&
                         !isTransparent(neighbors.nx) &&
-                        !isTransparent(neighbors.py) && 
+                        !isTransparent(neighbors.py) &&
                         !isTransparent(neighbors.ny) &&
-                        !isTransparent(neighbors.pz) && 
+                        !isTransparent(neighbors.pz) &&
                         !isTransparent(neighbors.nz)) {
                         continue;
                     }
                 }
 
+
                 const isWater = blockType === 5;
                 const baseColor = hexToRGB(materials[blockType].color);
-                const colorMultipliers = getBlockVariation(worldX, y, worldZ, blockType);
-                const finalColor = baseColor.map((c, i) => 
-                    Math.min(1, Math.max(0, c * colorMultipliers[i]))
+                const colorMultipliers = getBlockVariation(
+                    chunkX * CHUNK_SIZE + x,
+                    y,
+                    chunkZ * CHUNK_SIZE + z,
+                    blockType
                 );
+                const finalColor = isWater ? baseColor : // Use base color directly for water
+                    baseColor.map((c, i) => Math.min(1, Math.max(0, c * colorMultipliers[i])));
 
-                // Generate faces only if neighbor is transparent
+                // Generate faces with AO
                 if ((isWater && neighbors.px === 0) || (!isWater && isTransparent(neighbors.px)))
-                    addFace(isWater, [1, 0, 0], x + 1, y, z, finalColor);
+                    addFace(isWater, [1, 0, 0], x, y, z, finalColor);
                 if ((isWater && neighbors.nx === 0) || (!isWater && isTransparent(neighbors.nx)))
                     addFace(isWater, [-1, 0, 0], x, y, z, finalColor);
                 if ((isWater && neighbors.py === 0) || (!isWater && isTransparent(neighbors.py)))
-                    addFace(isWater, [0, 1, 0], x, y + 1, z, finalColor);
+                    addFace(isWater, [0, 1, 0], x, y, z, finalColor);
                 if ((isWater && neighbors.ny === 0) || (!isWater && isTransparent(neighbors.ny)))
                     addFace(isWater, [0, -1, 0], x, y, z, finalColor);
                 if ((isWater && neighbors.pz === 0) || (!isWater && isTransparent(neighbors.pz)))
-                    addFace(isWater, [0, 0, 1], x, y, z + 1, finalColor);
+                    addFace(isWater, [0, 0, 1], x, y, z, finalColor);
                 if ((isWater && neighbors.nz === 0) || (!isWater && isTransparent(neighbors.nz)))
                     addFace(isWater, [0, 0, -1], x, y, z, finalColor);
             }
@@ -1942,10 +2192,7 @@ function generateGeometry(chunkX, chunkZ, chunkData, adjacentChunks) {
 }
 
 function getBlockInWorld(currentChunkX, currentChunkZ, localX, localY, localZ, currentChunkData, adjacentChunks) {
-    // Handle Y bounds checking first
-    if (localY < 0 || localY >= CHUNK_HEIGHT) {
-        return 0; // Return air for out of bounds Y
-    }
+    if (localY < 0 || localY >= CHUNK_HEIGHT) return 0;
 
     // Calculate world coordinates
     const worldX = currentChunkX * CHUNK_SIZE + localX;
@@ -1956,22 +2203,25 @@ function getBlockInWorld(currentChunkX, currentChunkZ, localX, localY, localZ, c
     const targetChunkZ = Math.floor(worldZ / CHUNK_SIZE);
 
     // Calculate local coordinates within target chunk
-    const targetLocalX = ((worldX % CHUNK_SIZE) + CHUNK_SIZE) % CHUNK_SIZE;
-    const targetLocalZ = ((worldZ % CHUNK_SIZE) + CHUNK_SIZE) % CHUNK_SIZE;
+    let targetLocalX = worldX % CHUNK_SIZE;
+    let targetLocalZ = worldZ % CHUNK_SIZE;
+    // Adjust for negative coordinates
+    if (targetLocalX < 0) targetLocalX += CHUNK_SIZE;
+    if (targetLocalZ < 0) targetLocalZ += CHUNK_SIZE;
 
-    // If we're in the current chunk, use current chunk data
+    // Check if target is current chunk
     if (targetChunkX === currentChunkX && targetChunkZ === currentChunkZ) {
         return getBlock(currentChunkData, targetLocalX, localY, targetLocalZ);
     }
 
-    // Otherwise, look for adjacent chunk data
+    // Check adjacent chunks
     const chunkKey = `${targetChunkX},${targetChunkZ}`;
     if (adjacentChunks && adjacentChunks[chunkKey]) {
         const adjChunkData = new Int8Array(adjacentChunks[chunkKey]);
         return getBlock(adjChunkData, targetLocalX, localY, targetLocalZ);
     }
 
-    // If we can't find the chunk data, return air
+    // Default to air if chunk not found
     return 0;
 }
 
