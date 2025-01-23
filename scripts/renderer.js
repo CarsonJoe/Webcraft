@@ -56,12 +56,11 @@ export function updateFPSCounter() {
 export function removeChunkGeometry(chunkX, chunkZ) {
     const chunkKey = `${chunkX},${chunkZ}`;
     if (chunkMeshes[chunkKey]) {
-        // Dispose geometries and materials properly
-        [chunkMeshes[chunkKey].solid, chunkMeshes[chunkKey].water].forEach(mesh => {
-            scene.remove(mesh);
-            mesh.geometry.dispose();
-            mesh.material.dispose();
-        });
+        scene.remove(chunkMeshes[chunkKey].solid);
+        scene.remove(chunkMeshes[chunkKey].water);
+        chunkMeshes[chunkKey].solid.geometry.dispose();
+        chunkMeshes[chunkKey].water.geometry.dispose();
+        // Don't dispose materials - they're shared!
         delete chunkMeshes[chunkKey];
     }
 }

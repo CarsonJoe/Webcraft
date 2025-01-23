@@ -12,6 +12,9 @@ let sceneReady = false;
 export let spawnPoint = null;
 export const collisionGeometry = new Map();
 
+let lastUpdateTime = 0;
+const UPDATE_COOLDOWN = 100; // ms
+
 // Chunk storage and queues
 const chunks = {};
 const chunkStates = {};
@@ -39,6 +42,14 @@ const materials = {
     8: { color: 0x3b4044 }, // Slate
     9: { color: 0xFFFFFF }  // Limestone
 };
+
+const solidMaterial = new THREE.MeshLambertMaterial({ vertexColors: true });
+const waterMaterial = new THREE.MeshPhongMaterial({
+    color: 0x6380ec,
+    transparent: true,
+    opacity: 0.7,
+    side: THREE.DoubleSide
+});
 
 // Initialize world systems
 export function initWorld() {
@@ -137,28 +148,11 @@ function createChunkMeshes(chunkX, chunkZ, solidData, waterData) {
         chunkMeshes[chunkKey].water.geometry.dispose();
     }
 
-    // Create materials with proper configuration
-    const solidMaterial = new THREE.MeshLambertMaterial({
-        vertexColors: true,
-        side: THREE.FrontSide, // Ensure front faces are rendered
-        transparent: false,
-        depthWrite: true
-    });
-    
-    const waterMaterial = new THREE.MeshStandardMaterial({
-        color: 0x6380ec,
-        transparent: true,
-        opacity: 0.7,
-        side: THREE.DoubleSide, // Water should be double-sided
-        metalness: 0.3,
-        roughness: 0.1
-    });
-
     // Create geometries
     const solidGeometry = createGeometryFromData(solidData);
     const waterGeometry = createGeometryFromData(waterData);
 
-    // Create meshes
+    // Create meshes with shared materials
     const solidMesh = new THREE.Mesh(solidGeometry, solidMaterial);
     const waterMesh = new THREE.Mesh(waterGeometry, waterMaterial);
 
@@ -179,8 +173,6 @@ function createChunkMeshes(chunkX, chunkZ, solidData, waterData) {
     solidMesh.castShadow = true;
     solidMesh.receiveShadow = true;
     waterMesh.receiveShadow = true;
-
-    console.log(`Created meshes for chunk`);
 }
 
 function createGeometryFromData(data) {
@@ -349,6 +341,8 @@ function setBlock(x, y, z, type) {
 }
 
 function updateBlock(x, y, z, newBlockType) {
+    if (performance.now() - lastUpdateTime < UPDATE_COOLDOWN) return;
+    lastUpdateTime = performance.now();
     const chunkX = Math.floor(x / CHUNK_SIZE);
     const chunkZ = Math.floor(z / CHUNK_SIZE);
     const localX = ((x % CHUNK_SIZE) + CHUNK_SIZE) % CHUNK_SIZE;
