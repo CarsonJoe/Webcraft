@@ -7,14 +7,14 @@ let colorPRNG = null;
 function fastVariation(x, y, z) {
     // Use more iterations of bit mixing to get better distribution
     let seed = x * 3191 ^ y * 1337 ^ z * 7919;
-    
+
     // Additional mixing steps
     seed ^= seed << 13;
     seed ^= seed >> 17;
     seed ^= seed << 5;
     seed ^= seed >> 7;
     seed ^= seed << 11;
-    
+
     // Get a more granular value by using more bits
     return (seed & 0x3fffffff) / 0x3fffffff; // Using 30 bits instead of 31
 }
@@ -22,27 +22,27 @@ function fastVariation(x, y, z) {
 function getBlockVariation(worldX, y, worldZ, blockType) {
     const config = VARIATION_CONFIG[blockType] || {};
     if (!config.scale) return [1, 1, 1];
-    
+
     // Get unique variation per channel
     const variations = [
         fastVariation(
-            Math.floor(worldX/config.scale),
-            Math.floor(y/config.scale),
-            Math.floor(worldZ/config.scale)
+            Math.floor(worldX / config.scale),
+            Math.floor(y / config.scale),
+            Math.floor(worldZ / config.scale)
         ),
         fastVariation(
-            Math.floor(worldX/config.scale) + 7919,
-            Math.floor(y/config.scale),
-            Math.floor(worldZ/config.scale)
+            Math.floor(worldX / config.scale) + 7919,
+            Math.floor(y / config.scale),
+            Math.floor(worldZ / config.scale)
         ),
         fastVariation(
-            Math.floor(worldX/config.scale),
-            Math.floor(y/config.scale) + 3191,
-            Math.floor(worldZ/config.scale)
+            Math.floor(worldX / config.scale),
+            Math.floor(y / config.scale) + 3191,
+            Math.floor(worldZ / config.scale)
         )
     ];
 
-    return variations.map((v, i) => 
+    return variations.map((v, i) =>
         1 + (v - 0.5) * config.intensity * (config.channelBias?.[i] || 1)
     );
 }
@@ -135,38 +135,116 @@ function generateGeometry(chunkX, chunkZ, chunkData, adjacentChunks) {
     const solid = { positions: [], normals: [], colors: [], indices: [] };
     const water = { positions: [], normals: [], indices: [] };
 
-    // Moved inside generateGeometry to access solid/water
-    const addFace = (isWater, normal, x, y, z, color) => {
+    // Moved addFace inside generateGeometry and added AO calculations
+    const addFace = (isWater, normal, localX, localY, localZ, color) => {
         const target = isWater ? water : solid;
-        const indexOffset = target.positions.length / 3;
+
+        // Vertex positions in world coordinates
+        const positions = [];
+        let aoValues = [];
 
         // Define face vertices based on normal
-        const vertices = [];
         if (normal[0] === 1) { // East
-            vertices.push([x, y, z], [x, y + 1, z], [x, y + 1, z + 1], [x, y, z + 1]);
+            positions.push(
+                [localX + 1, localY, localZ],
+                [localX + 1, localY + 1, localZ],
+                [localX + 1, localY + 1, localZ + 1],
+                [localX + 1, localY, localZ + 1]
+            );
         } else if (normal[0] === -1) { // West
-            vertices.push([x, y, z + 1], [x, y + 1, z + 1], [x, y + 1, z], [x, y, z]);
+            positions.push(
+                [localX, localY, localZ + 1],
+                [localX, localY + 1, localZ + 1],
+                [localX, localY + 1, localZ],
+                [localX, localY, localZ]
+            );
         } else if (normal[1] === 1) { // Top
-            vertices.push([x, y, z + 1], [x + 1, y, z + 1], [x + 1, y, z], [x, y, z]);
+            positions.push(
+                [localX, localY + 1, localZ],
+                [localX, localY + 1, localZ + 1],
+                [localX + 1, localY + 1, localZ + 1],
+                [localX + 1, localY + 1, localZ]
+            );
         } else if (normal[1] === -1) { // Bottom
-            vertices.push([x, y, z], [x + 1, y, z], [x + 1, y, z + 1], [x, y, z + 1]);
+            positions.push(
+                [localX, localY, localZ],
+                [localX + 1, localY, localZ],
+                [localX + 1, localY, localZ + 1],
+                [localX, localY, localZ + 1]
+            );
         } else if (normal[2] === 1) { // North
-            vertices.push([x + 1, y, z], [x + 1, y + 1, z], [x, y + 1, z], [x, y, z]);
+            positions.push(
+                [localX + 1, localY, localZ + 1],
+                [localX + 1, localY + 1, localZ + 1],
+                [localX, localY + 1, localZ + 1],
+                [localX, localY, localZ + 1]
+            );
         } else { // South
-            vertices.push([x, y, z], [x, y + 1, z], [x + 1, y + 1, z], [x + 1, y, z]);
+            positions.push(
+                [localX, localY, localZ],
+                [localX, localY + 1, localZ],
+                [localX + 1, localY + 1, localZ],
+                [localX + 1, localY, localZ]
+            );
         }
 
-        // Add vertices and normals
-        vertices.forEach(v => {
-            target.positions.push(...v);
-            target.normals.push(...normal);
-            if (!isWater) target.colors.push(...color);
+        // Calculate ambient occlusion for each vertex
+        positions.forEach(pos => {
+            const [x, y, z] = pos;
+            let ao = 0;
+
+            // Check 3 adjacent blocks for occlusion
+            const checks = [];
+            if (normal[1] === 0) { // Vertical faces
+                checks.push(
+                    [x - normal[0], y, z - normal[2]],
+                    [x - normal[0], y - 1, z - normal[2]],
+                    [x, y - 1, z]
+                );
+            } else { // Horizontal faces
+                checks.push(
+                    [x - 1, y, z],
+                    [x, y, z - 1],
+                    [x - 1, y, z - 1]
+                );
+            }
+
+            checks.forEach(check => {
+                const [cx, cy, cz] = check;
+                if (getBlockInWorld(
+                    chunkX, chunkZ,
+                    Math.floor(cx),
+                    Math.floor(cy),
+                    Math.floor(cz),
+                    chunkData,
+                    adjacentChunks
+                ) !== 0) {
+                    ao += 0.3;
+                }
+            });
+
+            aoValues.push(Math.min(1, ao));
         });
 
-        // Add indices [0,1,2, 0,2,3]
+        // Add vertices with AO-adjusted colors
+        positions.forEach((pos, i) => {
+            target.positions.push(...pos);
+            target.normals.push(...normal);
+
+            if (!isWater) {
+                const ao = aoValues[i];
+                const darkened = color.map(c => c * (1 - ao * 0.45)); // AO intensity
+                target.colors.push(...darkened);
+            }
+        });
+
+        // Calculate starting vertex index for this face
+        const vertexCount = target.positions.length / 3;
+
+        // Add indices
         target.indices.push(
-            indexOffset, indexOffset + 1, indexOffset + 2,
-            indexOffset, indexOffset + 2, indexOffset + 3
+            vertexCount, vertexCount + 1, vertexCount + 2,
+            vertexCount, vertexCount + 2, vertexCount + 3
         );
     };
 
@@ -179,7 +257,7 @@ function generateGeometry(chunkX, chunkZ, chunkData, adjacentChunks) {
                 // Get neighbor information first
                 const worldX = chunkX * CHUNK_SIZE + x;
                 const worldZ = chunkZ * CHUNK_SIZE + z;
-                
+
                 const neighbors = {
                     px: getBlockInWorld(chunkX, chunkZ, x + 1, y, z, chunkData, adjacentChunks),
                     nx: getBlockInWorld(chunkX, chunkZ, x - 1, y, z, chunkData, adjacentChunks),
@@ -190,37 +268,43 @@ function generateGeometry(chunkX, chunkZ, chunkData, adjacentChunks) {
                 };
 
                 // Skip processing completely enclosed solid blocks
-                if (x > 0 && x < CHUNK_SIZE - 1 && 
+                if (x > 0 && x < CHUNK_SIZE - 1 &&
                     z > 0 && z < CHUNK_SIZE - 1 &&
                     y > 0 && y < CHUNK_HEIGHT - 1) {
-                    if (!isTransparent(neighbors.px) && 
+                    if (!isTransparent(neighbors.px) &&
                         !isTransparent(neighbors.nx) &&
-                        !isTransparent(neighbors.py) && 
+                        !isTransparent(neighbors.py) &&
                         !isTransparent(neighbors.ny) &&
-                        !isTransparent(neighbors.pz) && 
+                        !isTransparent(neighbors.pz) &&
                         !isTransparent(neighbors.nz)) {
                         continue;
                     }
                 }
 
+
                 const isWater = blockType === 5;
                 const baseColor = hexToRGB(materials[blockType].color);
-                const colorMultipliers = getBlockVariation(worldX, y, worldZ, blockType);
-                const finalColor = baseColor.map((c, i) => 
-                    Math.min(1, Math.max(0, c * colorMultipliers[i]))
+                const colorMultipliers = getBlockVariation(
+                    chunkX * CHUNK_SIZE + x,
+                    y,
+                    chunkZ * CHUNK_SIZE + z,
+                    blockType
                 );
+                const finalColor = isWater ? baseColor : // Use base color directly for water
+                    baseColor.map((c, i) => Math.min(1, Math.max(0, c * colorMultipliers[i])));
 
-                // Generate faces only if neighbor is transparent
+                // Generate faces with AO
                 if ((isWater && neighbors.px === 0) || (!isWater && isTransparent(neighbors.px)))
-                    addFace(isWater, [1, 0, 0], x + 1, y, z, finalColor);
+                    addFace(isWater, [1, 0, 0], x, y, z, finalColor);
                 if ((isWater && neighbors.nx === 0) || (!isWater && isTransparent(neighbors.nx)))
                     addFace(isWater, [-1, 0, 0], x, y, z, finalColor);
-                if ((isWater && neighbors.py === 0) || (!isWater && isTransparent(neighbors.py)))
-                    addFace(isWater, [0, 1, 0], x, y + 1, z, finalColor);
+                // Modified line for the top face (py) to check if the block above is transparent (air or water)
+                if (isTransparent(neighbors.py))
+                    addFace(isWater, [0, 1, 0], x, y, z, finalColor);
                 if ((isWater && neighbors.ny === 0) || (!isWater && isTransparent(neighbors.ny)))
                     addFace(isWater, [0, -1, 0], x, y, z, finalColor);
                 if ((isWater && neighbors.pz === 0) || (!isWater && isTransparent(neighbors.pz)))
-                    addFace(isWater, [0, 0, 1], x, y, z + 1, finalColor);
+                    addFace(isWater, [0, 0, 1], x, y, z, finalColor);
                 if ((isWater && neighbors.nz === 0) || (!isWater && isTransparent(neighbors.nz)))
                     addFace(isWater, [0, 0, -1], x, y, z, finalColor);
             }
@@ -236,10 +320,7 @@ function generateGeometry(chunkX, chunkZ, chunkData, adjacentChunks) {
 }
 
 function getBlockInWorld(currentChunkX, currentChunkZ, localX, localY, localZ, currentChunkData, adjacentChunks) {
-    // Handle Y bounds checking first
-    if (localY < 0 || localY >= CHUNK_HEIGHT) {
-        return 0; // Return air for out of bounds Y
-    }
+    if (localY < 0 || localY >= CHUNK_HEIGHT) return 0;
 
     // Calculate world coordinates
     const worldX = currentChunkX * CHUNK_SIZE + localX;
@@ -250,22 +331,25 @@ function getBlockInWorld(currentChunkX, currentChunkZ, localX, localY, localZ, c
     const targetChunkZ = Math.floor(worldZ / CHUNK_SIZE);
 
     // Calculate local coordinates within target chunk
-    const targetLocalX = ((worldX % CHUNK_SIZE) + CHUNK_SIZE) % CHUNK_SIZE;
-    const targetLocalZ = ((worldZ % CHUNK_SIZE) + CHUNK_SIZE) % CHUNK_SIZE;
+    let targetLocalX = worldX % CHUNK_SIZE;
+    let targetLocalZ = worldZ % CHUNK_SIZE;
+    // Adjust for negative coordinates
+    if (targetLocalX < 0) targetLocalX += CHUNK_SIZE;
+    if (targetLocalZ < 0) targetLocalZ += CHUNK_SIZE;
 
-    // If we're in the current chunk, use current chunk data
+    // Check if target is current chunk
     if (targetChunkX === currentChunkX && targetChunkZ === currentChunkZ) {
         return getBlock(currentChunkData, targetLocalX, localY, targetLocalZ);
     }
 
-    // Otherwise, look for adjacent chunk data
+    // Check adjacent chunks
     const chunkKey = `${targetChunkX},${targetChunkZ}`;
     if (adjacentChunks && adjacentChunks[chunkKey]) {
         const adjChunkData = new Int8Array(adjacentChunks[chunkKey]);
         return getBlock(adjChunkData, targetLocalX, localY, targetLocalZ);
     }
 
-    // If we can't find the chunk data, return air
+    // Default to air if chunk not found
     return 0;
 }
 
