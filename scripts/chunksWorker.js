@@ -1,8 +1,7 @@
 import SimplexNoise from 'https://cdn.jsdelivr.net/npm/simplex-noise@3.0.0/+esm';
 
-const CHUNK_SIZE = 8;
-const CHUNK_HEIGHT = 100;
-const WATER_LEVEL = 24;
+import { CHUNK_SIZE, CHUNK_HEIGHT, WATER_LEVEL } from './constants.js';
+
 const BEACH_LEVEL = WATER_LEVEL + 2;
 
 const BIOME_TYPES = {
@@ -15,7 +14,7 @@ const BIOME_TYPES = {
 
 // Create a seedable random generator
 function createPRNG(seed) {
-    return function() {
+    return function () {
         seed = (seed * 9301 + 49297) % 233280;
         return seed / 233280;
     };
@@ -26,12 +25,12 @@ let featureNoise;
 let biomeNoise;
 let grassDirtNoise;
 
-self.onmessage = function(e) {
+self.onmessage = function (e) {
     if (e.data.type === 'init') {
         console.log("[Worker] Received init message");
         const seed = e.data.seed;
         // Initialize noise generators with the seed
-        simplex = new SimplexNoise({ 
+        simplex = new SimplexNoise({
             random: createPRNG(seed)
         });
         featureNoise = new SimplexNoise({
@@ -50,7 +49,7 @@ self.onmessage = function(e) {
         const { chunkX, chunkZ } = e.data;
         if (!simplex) {
             console.error("[Worker] Noise generators not initialized!");
-            self.postMessage({ 
+            self.postMessage({
                 type: 'error',
                 message: "Noise generators not initialized",
                 chunkX,
@@ -98,7 +97,7 @@ function generateChunk(chunkX, chunkZ) {
             // Get noise values from initialized generators
             const baseHeight = (simplex.noise2D(worldX * 0.0025, worldZ * 0.0025) + 1) * 0.8;
             const detailHeight = (simplex.noise2D(worldX * 0.01, worldZ * 0.01) + 1) * 0.5;
-            const height = Math.floor((baseHeight * 0.8 + detailHeight * 0.2) * (CHUNK_HEIGHT - WATER_LEVEL));
+            const height = Math.floor(0.8 * (baseHeight * 0.8 + detailHeight * 0.2) * (CHUNK_HEIGHT - WATER_LEVEL));
 
             // Use 3D noise for vertical variations
             const slateNoise = simplex.noise3D(worldX * 0.025, 0, worldZ * 0.025);
@@ -248,49 +247,94 @@ function generateLargeTree(chunk, chunkX, chunkZ, worldX, worldZ, baseHeight) {
     const trunkHeight = Math.floor(treeHeight * 0.7);
     const leafRadius = Math.floor(treeHeight * 0.4) + 2;
 
-    // Convert world coordinates to local chunk coordinates
-    const localX = worldX - chunkX * CHUNK_SIZE;
-    const localZ = worldZ - chunkZ * CHUNK_SIZE;
+    // Precompute chunk boundaries
+    const chunkStartX = chunkX * CHUNK_SIZE;
+    const chunkEndX = chunkStartX + CHUNK_SIZE - 1;
+    const chunkStartZ = chunkZ * CHUNK_SIZE;
+    const chunkEndZ = chunkStartZ + CHUNK_SIZE - 1;
 
-    // Check if trunk base is in this chunk
+    // Early exit if trunk base is blocked in this chunk
+    const localX = worldX - chunkStartX;
+    const localZ = worldZ - chunkStartZ;
     if (localX >= 0 && localX < CHUNK_SIZE && localZ >= 0 && localZ < CHUNK_SIZE) {
         if (getBlockInChunk(chunk, localX, baseHeight, localZ) === 6) return;
     }
 
-    // Generate trunk
-    for (let y = baseHeight; y < baseHeight + trunkHeight && y < CHUNK_HEIGHT; y++) {
-        // Main trunk
-        setBlockIfInChunk(chunk, chunkX, chunkZ, worldX, worldZ, y, 6);
+    // Optimized leaves generation
+    const leavesStartY = baseHeight + trunkHeight - 5;
+    const leavesEndY = baseHeight + treeHeight;
+    for (let y = leavesStartY; y <= leavesEndY; y++) {
+        const radius = leafRadius - Math.floor((y - leavesStartY) / 3);
+        if (radius <= 0) continue;
 
-        // Thicken trunk
-        const directions = [
-            { dx: 1, dz: 0 }, { dx: -1, dz: 0 },
-            { dx: 0, dz: 1 }, { dx: 0, dz: -1 }
-        ];
+        const radiusSq = radius * radius;
+        const dxMin = Math.max(-radius, chunkStartX - worldX);
+        const dxMax = Math.min(radius, chunkEndX - worldX);
+        
+        for (let dx = dxMin; dx <= dxMax; dx++) {
+            const xSq = dx * dx;
+            if (xSq > radiusSq) continue;
 
-        directions.forEach(({ dx, dz }) => {
-            setBlockIfInChunk(chunk, chunkX, chunkZ, worldX + dx, worldZ + dz, y, 6);
-        });
+            const zMax = Math.sqrt(radiusSq - xSq);
+            const dzMin = Math.max(-Math.floor(zMax), chunkStartZ - worldZ);
+            const dzMax = Math.min(Math.floor(zMax), chunkEndZ - worldZ);
+            
+            for (let dz = dzMin; dz <= dzMax; dz++) {
+                if (xSq + dz * dz > radiusSq) continue;
+                setBlockIfInChunk(
+                    chunk, chunkX, chunkZ,
+                    worldX + dx, worldZ + dz, y,
+                    7, // Leaves
+                    0.3
+                );
+            }
+        }
     }
 
-    // Generate leaves
-    for (let y = baseHeight + trunkHeight - 5; y <= baseHeight + treeHeight; y++) {
-        const layerRadius = leafRadius - Math.floor((y - (baseHeight + trunkHeight - 5)) / 3);
+    // Optimized trunk generation
+    const bendDirection = Math.random() * Math.PI * 2;
+    const cosBend = Math.cos(bendDirection);
+    const sinBend = Math.sin(bendDirection);
+    const baseRadius = 1.3;
+    const topRadius = 1;
+    const bendAmount = 2.5;
 
-        for (let dx = -layerRadius; dx <= layerRadius; dx++) {
-            for (let dz = -layerRadius; dz <= layerRadius; dz++) {
-                if (dx * dx + dz * dz <= layerRadius * layerRadius) {
-                    setBlockIfInChunk(
-                        chunk,
-                        chunkX,
-                        chunkZ,
-                        worldX + dx,
-                        worldZ + dz,
-                        y,
-                        7, // Leaves
-                        0.3 // 80% density
-                    );
-                }
+    for (let yRel = 0; yRel < trunkHeight; yRel++) {
+        const worldY = baseHeight + yRel;
+        if (worldY >= CHUNK_HEIGHT) break;
+
+        const progress = yRel / trunkHeight;
+        const currentRadius = baseRadius * (1 - progress) + topRadius * progress;
+        const currentRadiusSq = currentRadius * currentRadius;
+        const maxD = Math.floor(currentRadius);
+        const bendProgress = Math.sin(progress * Math.PI);
+
+        const trunkX = worldX + bendAmount * bendProgress * cosBend;
+        const trunkZ = worldZ + bendAmount * bendProgress * sinBend;
+
+        // Calculate dx bounds for current chunk
+        const dxMin = Math.max(-maxD, Math.ceil(chunkStartX - 0.5 - trunkX));
+        const dxMax = Math.min(maxD, Math.floor(chunkEndX + 0.5 - trunkX - 1e-9));
+        if (dxMin > dxMax) continue;
+
+        for (let dx = dxMin; dx <= dxMax; dx++) {
+            const xSq = dx * dx;
+            if (xSq > currentRadiusSq) continue;
+
+            const zMax = Math.sqrt(currentRadiusSq - xSq);
+            const dzMin = Math.max(-Math.floor(zMax), Math.ceil(chunkStartZ - 0.5 - trunkZ));
+            const dzMax = Math.min(Math.floor(zMax), Math.floor(chunkEndZ + 0.5 - trunkZ - 1e-9));
+            if (dzMin > dzMax) continue;
+
+            for (let dz = dzMin; dz <= dzMax; dz++) {
+                if (xSq + dz * dz > currentRadiusSq) continue;
+                setBlockIfInChunk(
+                    chunk, chunkX, chunkZ,
+                    Math.round(trunkX + dx),
+                    Math.round(trunkZ + dz),
+                    worldY,
+                    6 // Wood
+                );
             }
         }
     }
@@ -302,7 +346,7 @@ function generateBush(chunk, chunkX, chunkZ, worldX, worldZ, baseHeight) {
     for (let y = baseHeight; y < baseHeight + bushSize && y < CHUNK_HEIGHT; y++) {
         for (let dx = -1; dx <= 1; dx++) {
             for (let dz = -1; dz <= 1; dz++) {
-                if (Math.random() < 0.7) {
+                if (Math.random() < 0.4) {
                     setBlockIfInChunk(
                         chunk,
                         chunkX,
@@ -334,7 +378,7 @@ function generateLargeRockFormation(chunk, chunkX, chunkZ, worldX, worldZ, baseH
                         chunkZ,
                         worldX + dx,
                         worldZ + dz,
-                        y,
+                        y - 1,
                         rockType
                     );
                 }
@@ -392,7 +436,7 @@ function getBlockInChunk(chunk, x, y, z) {
 function getHeightAtWorld(worldX, worldZ) {
     const baseHeight = (simplex.noise2D(worldX * 0.0025, worldZ * 0.0025) + 1) * 0.8;
     const detailHeight = (simplex.noise2D(worldX * 0.01, worldZ * 0.01) + 1) * 0.5;
-    return Math.floor((baseHeight * 0.8 + detailHeight * 0.2) * (CHUNK_HEIGHT - WATER_LEVEL)); // Removed -20
+    return Math.floor(0.8 * (baseHeight * 0.8 + detailHeight * 0.2) * (CHUNK_HEIGHT - WATER_LEVEL));
 }
 
 function setBlockIfInChunk(chunk, chunkX, chunkZ, worldX, worldZ, y, type, density = 1.0) {

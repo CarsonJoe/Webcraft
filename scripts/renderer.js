@@ -1,7 +1,6 @@
 let renderer, camera;
 export let scene = new THREE.Scene(); 
 export const chunkMeshes = {};
-const pendingChunkUpdates = new Set();
 
 // FPS counter variables
 let fpsCounter;
@@ -54,14 +53,6 @@ export function updateFPSCounter() {
     }
 }
 
-// Create a translucent material for water
-const waterMaterial = new THREE.MeshPhongMaterial({
-    color: 0x6380ec,
-    transparent: true,
-    opacity: 0.7,
-    side: THREE.DoubleSide
-});
-
 export function removeChunkGeometry(chunkX, chunkZ) {
     const chunkKey = `${chunkX},${chunkZ}`;
     if (chunkMeshes[chunkKey]) {
@@ -85,7 +76,7 @@ export function createSkybox(scene, renderer) {
             scene.background = rt.texture;
             
             // Set the fog color to match the sky color
-            const skyColor = new THREE.Color().setHSL(0.6, 1, 0.9);  // Adjust these values to match your sky texture
+            const skyColor = new THREE.Color().setHSL(0.6, 1, 0.9);  // Adjust these values to match sky texture
             scene.fog.color.copy(skyColor);
         },
         undefined,

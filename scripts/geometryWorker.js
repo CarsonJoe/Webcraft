@@ -1,4 +1,3 @@
-// scripts/geometryWorker.js
 import { CHUNK_SIZE, CHUNK_HEIGHT } from './constants.js';
 
 let materials = {};
@@ -13,14 +12,13 @@ function fastVariation(x, y, z) {
     seed ^= seed << 13;
     seed ^= seed >> 17;
     seed ^= seed << 5;
-    seed ^= seed >> 7;  // Added one more mix
-    seed ^= seed << 11; // And another
+    seed ^= seed >> 7;
+    seed ^= seed << 11;
     
     // Get a more granular value by using more bits
     return (seed & 0x3fffffff) / 0x3fffffff; // Using 30 bits instead of 31
 }
 
-// Keep your original getBlockVariation function exactly as it was:
 function getBlockVariation(worldX, y, worldZ, blockType) {
     const config = VARIATION_CONFIG[blockType] || {};
     if (!config.scale) return [1, 1, 1];
@@ -51,8 +49,8 @@ function getBlockVariation(worldX, y, worldZ, blockType) {
 
 const VARIATION_CONFIG = {
     1: { // Grass
-        scale: .2,     // Increased scale for more gradual changes
-        intensity: 0.08,  // Reduced intensity
+        scale: .2,     // Increase scale for more gradual changes
+        intensity: 0.08,
         channelBias: [0.9, 1.1, 0.9]
     },
     2: { // Dirt
@@ -108,12 +106,12 @@ self.onmessage = function (e) {
             break;
 
         case 'process_chunk':
-            const { chunkX, chunkZ, chunkData, adjacentChunks } = e.data; // Add adjacentChunks here
+            const { chunkX, chunkZ, chunkData, adjacentChunks } = e.data;
             const result = generateGeometry(
                 chunkX,
                 chunkZ,
                 new Int8Array(chunkData),
-                adjacentChunks  // Pass adjacent chunks to generateGeometry
+                adjacentChunks
             );
 
             self.postMessage({

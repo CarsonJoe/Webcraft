@@ -9,7 +9,6 @@ let geometryWorker = null;
 let initializationComplete = false;
 let workerInitialized = false;
 let sceneReady = false;
-let initialChunkLoaded = false;
 export let spawnPoint = null;
 export const collisionGeometry = new Map();
 
