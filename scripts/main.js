@@ -15,7 +15,7 @@ notifySceneReady();
 
 // Create and apply the skybox
 createSkybox(scene, renderer);
-
+ 
 // Add ambient light
 const ambientLight = new THREE.AmbientLight(0x404050);
 scene.add(ambientLight);
