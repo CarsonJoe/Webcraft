@@ -12,13 +12,15 @@ let sceneReady = false;
 export let spawnPoint = null;
 export const collisionGeometry = new Map();
 
+
 let lastUpdateTime = 0;
 const UPDATE_COOLDOWN = 100; // ms
 
 // Chunk storage and queues
 const chunks = {};
 const chunkStates = {};
-const chunkLoadQueue = [];
+const queuedChunks = new Set(); // Track chunk keys like "x,z"
+const chunkLoadQueue = [];      // Use as a priority queue (heap)
 const blockColors = new Map();
 
 let currentPlayerChunkX = 0;
@@ -229,34 +231,30 @@ function addToLoadQueue(x, z, priority = Infinity) {
     const dx = x - currentPlayerChunkX;
     const dz = z - currentPlayerChunkZ;
     
-    // Skip if out of bounds
+    // 1. Skip out-of-bounds chunks
     if (Math.abs(dx) > RENDER_DISTANCE + 1 || Math.abs(dz) > RENDER_DISTANCE + 1) return;
     
-    // Calculate priority based on distance
+    // 2. Skip if already queued
+    if (queuedChunks.has(chunkKey)) return;
+    
+    // 3. Add to queue and tracking set
     const distanceSq = dx * dx + dz * dz;
-    const existing = chunkLoadQueue.find(c => c.x === x && c.z === z);
+    chunkLoadQueue.push({ x, z, priority, distanceSq });
+    queuedChunks.add(chunkKey);
     
-    if (existing) {
-        // Update priority if new request is more urgent
-        if (priority < existing.priority) {
-            existing.priority = priority;
-            existing.distanceSq = distanceSq;
-        }
-        return;
+    // 4. Maintain heap property (O(log n) insertion)
+    let index = chunkLoadQueue.length - 1;
+    while (index > 0) {
+      const parentIndex = Math.floor((index - 1) / 2);
+      if (
+        chunkLoadQueue[parentIndex].priority < chunkLoadQueue[index].priority ||
+        (chunkLoadQueue[parentIndex].priority === chunkLoadQueue[index].priority &&
+          chunkLoadQueue[parentIndex].distanceSq <= chunkLoadQueue[index].distanceSq)
+      ) break;
+      [chunkLoadQueue[parentIndex], chunkLoadQueue[index]] = [chunkLoadQueue[index], chunkLoadQueue[parentIndex]];
+      index = parentIndex;
     }
-    
-    chunkLoadQueue.push({
-        x, z,
-        priority: Math.min(priority, distanceSq),
-        distanceSq
-    });
-    
-    // Keep the queue sorted by priority then distance
-    chunkLoadQueue.sort((a, b) => {
-        if (a.priority !== b.priority) return a.priority - b.priority;
-        return a.distanceSq - b.distanceSq;
-    });
-}
+  }
 
 function processChunkQueue() {
     if (!workerInitialized || !sceneReady) return;
@@ -281,6 +279,7 @@ function processChunkQueue() {
     
     while (chunkLoadQueue.length > 0 && processed < MAX_CHUNKS_PER_FRAME) {
         const { x, z } = chunkLoadQueue.shift();
+        queuedChunks.delete(`${x},${z}`);
         const chunkKey = `${x},${z}`;
         
         if (!chunks[chunkKey] && chunkStates[chunkKey] !== CHUNK_LOADING) {
