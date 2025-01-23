@@ -31,7 +31,8 @@ export function checkCollision(entity, deltaTime) {
         for (let y = Math.floor(minY); y <= Math.floor(maxY); y++) {
             for (let z = Math.floor(minZ); z <= Math.floor(maxZ); z++) {
                 const block = getBlock(x, y, z);
-                if (block !== 0 && block !== 5) {
+                // Exclude air (0), water (5), and leaves (7) from collision checks
+                if (block !== 0 && block !== 5 && block !== 7) {
                     // Calculate overlap for each axis
                     const overlapX = Math.min(maxX - x, (x + 1) - minX);
                     const overlapY = Math.min(maxY - y, (y + 1) - minY);
@@ -370,7 +371,7 @@ const Player = (function () {
         [HALF_WIDTH, 0, -HALF_DEPTH],
         [-HALF_WIDTH, 0, HALF_DEPTH],
         [HALF_WIDTH, 0, HALF_DEPTH],
-        
+
         // Upper layer (y = PLAYER_HEIGHT)
         [-HALF_WIDTH, PLAYER_HEIGHT, -HALF_DEPTH],
         [HALF_WIDTH, PLAYER_HEIGHT, -HALF_DEPTH],
@@ -536,58 +537,58 @@ const Player = (function () {
 
     function update() {
         if (!yawObject) return;
-    
+
         const currentTime = performance.now();
         const deltaTime = (currentTime - lastTime) / 1000; // Convert to seconds
         lastTime = currentTime;
-    
+
         const direction = new THREE.Vector3();
         const rotation = yawObject.rotation.y;
-    
+
         if (keys['KeyW']) direction.z = -1;
         if (keys['KeyS']) direction.z = 1;
         if (keys['KeyA']) direction.x = -1;
         if (keys['KeyD']) direction.x = 1;
-    
+
         direction.applyAxisAngle(new THREE.Vector3(0, 1, 0), rotation);
-    
+
         if (isFlying) {
             // Flying movement logic
             let flySpeed = isSprinting ? SPRINT_SPEED : NORMAL_SPEED;
             flySpeed *= 2;
-    
+
             // Get camera's forward and right vectors
             const forward = new THREE.Vector3();
             camera.getWorldDirection(forward);
             forward.normalize();
-    
+
             const right = new THREE.Vector3();
             right.crossVectors(new THREE.Vector3(0, 1, 0), forward).normalize();
-    
+
             const moveDirection = new THREE.Vector3();
-    
+
             // Movement based on camera direction
             if (keys['KeyW']) moveDirection.add(forward);
             if (keys['KeyS']) moveDirection.sub(forward);
             if (keys['KeyA']) moveDirection.add(right);
             if (keys['KeyD']) moveDirection.sub(right);
-    
+
             // Vertical movement
             if (keys['Space']) moveDirection.y += 1;
             if (keys['ShiftLeft']) moveDirection.y -= 1;
-    
+
             if (moveDirection.length() > 0) {
                 moveDirection.normalize();
             }
-    
+
             const movement = moveDirection.multiplyScalar(flySpeed * deltaTime);
             yawObject.position.add(movement);
-    
+
             canJump = false; // Disable jumping while flying
         } else {
             // Original movement and physics (non-flying)
             isSwimming = checkWaterCollision(yawObject.position.x, yawObject.position.y + EYE_HEIGHT / 2, yawObject.position.z);
-    
+        
             if (keys['Space']) {
                 if (isSwimming) {
                     velocity.y = SWIM_SPEED; // Swim upwards
@@ -596,7 +597,7 @@ const Player = (function () {
                     canJump = false;
                 }
             }
-    
+        
             // Apply gravity and vertical collision detection
             velocity.y -= (isSwimming ? WATER_GRAVITY : GRAVITY) * deltaTime;
             if (checkCollision(yawObject.position.x, yawObject.position.y + velocity.y * deltaTime, yawObject.position.z)) {
@@ -606,15 +607,22 @@ const Player = (function () {
                 velocity.y = 0;
             }
             yawObject.position.y += velocity.y * deltaTime;
-    
-            const currentSpeed = isSwimming ? SWIM_SPEED : (isSprinting ? SPRINT_SPEED : NORMAL_SPEED);
-    
+        
+            // Check if the player is in leaves
+            const isInLeaves = checkInLeaves();
+        
+            // Adjust movement speed based on whether the player is in leaves
+            let currentSpeed = isSwimming ? SWIM_SPEED : (isSprinting ? SPRINT_SPEED : NORMAL_SPEED);
+            if (isInLeaves) {
+                currentSpeed *= 0.5; // Reduce speed by 50% when in leaves
+            }
+        
             // Horizontal movement and collision detection with auto-jump
             const movement = direction.multiplyScalar(currentSpeed * deltaTime);
             const newX = yawObject.position.x + movement.x;
             const newZ = yawObject.position.z + movement.z;
-    
-            // Check for collision at the new position
+        
+            // Check for collision at the new position (ignoring leaves)
             if (checkCollision(newX, yawObject.position.y, newZ)) {
                 // Check if we can step up
                 if (!checkCollision(newX, yawObject.position.y + STEP_HEIGHT, newZ)) {
@@ -637,7 +645,7 @@ const Player = (function () {
                 yawObject.position.z = newZ;
             }
         }
-    
+
         // Static collision check to prevent being stuck in blocks (only when not flying)
         if (!isFlying) {
             let resolved = false;
@@ -646,13 +654,13 @@ const Player = (function () {
                 resolved = true;
                 if (yawObject.position.y >= CHUNK_HEIGHT) break; // Prevent infinite loop
             }
-    
+
             if (resolved) {
                 velocity.y = 0;
                 canJump = true;
             }
         }
-    
+
         // Ensure player doesn't fall through the world
         if (yawObject.position.y < -10) {
             yawObject.position.set(0, 200, 0);
@@ -667,19 +675,19 @@ const Player = (function () {
         const maxY = y + PLAYER_HEIGHT;
         const minZ = z - HALF_WIDTH;
         const maxZ = z + HALF_WIDTH;
-    
+
         const startX = Math.floor(minX);
         const endX = Math.floor(maxX);
         const startY = Math.floor(minY);
         const endY = Math.floor(maxY);
         const startZ = Math.floor(minZ);
         const endZ = Math.floor(maxZ);
-    
+
         for (let bx = startX; bx <= endX; bx++) {
             for (let bz = startZ; bz <= endZ; bz++) {
                 for (let by = startY; by <= endY; by++) {
                     const blockType = getBlockGlobal(bx, by, bz);
-                    if (blockType !== 0 && blockType !== 5) {
+                    if (blockType !== 0 && blockType !== 5 && blockType !== 7) {
                         return true; // Collision detected
                     }
                 }
@@ -691,6 +699,28 @@ const Player = (function () {
     function checkWaterCollision(x, y, z) {
         const blockType = getBlock(Math.floor(x), Math.floor(y), Math.floor(z));
         return blockType === 5; // 5 is the water block type
+    }
+
+    function checkInLeaves() {
+        const pos = yawObject.position;
+        const minX = pos.x - HALF_WIDTH;
+        const maxX = pos.x + HALF_WIDTH;
+        const minY = pos.y;
+        const maxY = pos.y + PLAYER_HEIGHT;
+        const minZ = pos.z - HALF_WIDTH;
+        const maxZ = pos.z + HALF_WIDTH;
+
+        for (let x = Math.floor(minX); x <= Math.floor(maxX); x++) {
+            for (let y = Math.floor(minY); y <= Math.floor(maxY); y++) {
+                for (let z = Math.floor(minZ); z <= Math.floor(maxZ); z++) {
+                    const blockType = getBlockGlobal(x, y, z);
+                    if (blockType === 7) { // Leaves are block type 7
+                        return true;
+                    }
+                }
+            }
+        }
+        return false;
     }
 
     function getPosition() {
@@ -706,23 +736,23 @@ const Player = (function () {
         const blockX = Math.floor(x);
         const blockY = Math.floor(y);
         const blockZ = Math.floor(z);
-    
+
         const chunkX = Math.floor(blockX / CHUNK_SIZE);
         const chunkZ = Math.floor(blockZ / CHUNK_SIZE);
         const chunkKey = `${chunkX},${chunkZ}`;
-    
+
         if (!chunks[chunkKey]) {
             addToLoadQueue(chunkX, chunkZ, Infinity);
             return 0;
         }
-    
+
         const localX = ((blockX % CHUNK_SIZE) + CHUNK_SIZE) % CHUNK_SIZE;
         const localZ = ((blockZ % CHUNK_SIZE) + CHUNK_SIZE) % CHUNK_SIZE;
         const localY = blockY;
-    
+
         if (localY < 0) return 1; // Bedrock at bottom
         if (localY >= CHUNK_HEIGHT) return 0; // Air above max height
-    
+
         return chunks[chunkKey][localX + localZ * CHUNK_SIZE + localY * CHUNK_SIZE * CHUNK_SIZE] || 0;
     }
 
@@ -963,14 +993,14 @@ const solidMaterial = new THREE.MeshLambertMaterial({ vertexColors: true });
 export const waterMaterial = new THREE.ShaderMaterial({
     uniforms: {
         time: { value: 0 },
-        waterColor: { value: new THREE.Color(0x5692cc) },
+        waterColor: { value: new THREE.Color(0x6fbffc) },
         lightDirection: { value: new THREE.Vector3(1, 1, 1).normalize() },
         waveScale: { value: .2 },
         fogColor: { value: new THREE.Color(0x619dde) },
         fogNear: { value: 20 },
         fogFar: { value: 300 },
         cameraPos: { value: new THREE.Vector3() }, // Added camera position
-        reflectionIntensity: { value: 0.4 } // New uniform for reflection control
+        reflectionIntensity: { value: 0.2 } // New uniform for reflection control
     },
     vertexShader: `
         varying vec3 vNormal;
@@ -1107,9 +1137,9 @@ export const waterMaterial = new THREE.ShaderMaterial({
         fresnel *= reflectionIntensity; // Control reflection strength
 
         // Base color gradient from displacement
-        float gradientFactor = smoothstep(-0.5, 0.5, vDisplacement);
-        vec3 darkColor = waterColor * 0.9;
-        vec3 lightColor = waterColor * 1.5;
+        float gradientFactor = smoothstep(-0.9, 0.9, vDisplacement);
+        vec3 darkColor = waterColor * 0.95;
+        vec3 lightColor = waterColor * 1.05;
         vec3 baseColor = mix(darkColor, lightColor, gradientFactor);
 
         // Specular highlights (Blinn-Phong model)
@@ -1129,7 +1159,7 @@ export const waterMaterial = new THREE.ShaderMaterial({
         finalColor = mix(finalColor, fogColor, fogFactor);
 
         // Alpha based on displacement
-        float alpha = 0.5 + 0.5 * abs(vDisplacement);
+        float alpha = 0.8 + 0.2 * abs(vDisplacement);
 
         gl_FragColor = vec4(finalColor, alpha);
     }
@@ -1897,7 +1927,7 @@ function generateLargeTree(chunk, chunkX, chunkZ, worldX, worldZ, baseHeight) {
                     chunk, chunkX, chunkZ,
                     worldX + dx, worldZ + dz, y,
                     7, // Leaves
-                    0.3
+                    0.2
                 );
             }
         }
@@ -1958,7 +1988,7 @@ function generateBush(chunk, chunkX, chunkZ, worldX, worldZ, baseHeight) {
     for (let y = baseHeight; y < baseHeight + bushSize && y < CHUNK_HEIGHT; y++) {
         for (let dx = -1; dx <= 1; dx++) {
             for (let dz = -1; dz <= 1; dz++) {
-                if (Math.random() < 0.4) {
+                if (Math.random() < 0.2) {
                     setBlockIfInChunk(
                         chunk,
                         chunkX,
@@ -2030,7 +2060,7 @@ function generateSmallTree(chunk, chunkX, chunkZ, worldX, worldZ, baseHeight) {
                         worldZ + dz,
                         y,
                         7, // Leaves
-                        0.5 // 70% density
+                        0.2 // 70% density
                     );
                 }
             }
@@ -2088,8 +2118,8 @@ function fastVariation(x, y, z) {
     seed ^= seed >> 7;
     seed ^= seed << 11;
 
-    // Get a more granular value by using more bits
-    return (seed & 0x3fffffff) / 0x3fffffff; // Using 30 bits instead of 31
+    // Map the result to the range [-1, 1]
+    return ((seed & 0x3fffffff) / 0x3fffffff) * 2 - 1;
 }
 
 function getBlockVariation(worldX, y, worldZ, blockType) {
@@ -2123,7 +2153,7 @@ function getBlockVariation(worldX, y, worldZ, blockType) {
 const VARIATION_CONFIG = {
     1: { // Grass
         scale: .2,     // Increase scale for more gradual changes
-        intensity: 0.08,
+        intensity: 0.06,
         channelBias: [0.9, 1.1, 0.9]
     },
     2: { // Dirt
@@ -2148,7 +2178,7 @@ const VARIATION_CONFIG = {
     },
     7: { // Leaves
         scale: .1,
-        intensity: 0.4,
+        intensity: 0.2,
         channelBias: [0.8, 1.2, 0.7]
     },
     8: { // Slate
@@ -2209,11 +2239,11 @@ function generateGeometry(chunkX, chunkZ, chunkData, adjacentChunks) {
     const water = { positions: [], normals: [], indices: [] };
 
     // Moved addFace inside generateGeometry and added AO calculations
-    const addFace = (isWater, normal, localX, localY, localZ, color) => {
+    const addFace = (isWater, normal, localX, localY, localZ, color, isLeaf = false) => {
         const target = isWater ? water : solid;
 
         // Vertex positions in world coordinates
-        const positions = [];
+        let positions = [];
         let aoValues = [];
 
         // Define face vertices based on normal
@@ -2259,6 +2289,74 @@ function generateGeometry(chunkX, chunkZ, chunkData, adjacentChunks) {
                 [localX + 1, localY + 1, localZ],
                 [localX + 1, localY, localZ]
             );
+        }
+
+        // Apply 3D rotation and translation for leaf blocks
+        if (isLeaf) {
+            const worldX = chunkX * CHUNK_SIZE + localX;
+            const worldZ = chunkZ * CHUNK_SIZE + localZ;
+        
+            // Generate base variations once per axis
+            const variationX = fastVariation(worldX + normal[0], localY + normal[1], worldZ + normal[2]);
+            const variationY = fastVariation(worldX + normal[1], localY + normal[2], worldZ + normal[0]);
+            const variationZ = fastVariation(worldX + normal[2], localY + normal[0], worldZ + normal[1]);
+        
+            // Apply variations to all transformations
+            const maxRotation = Math.PI / 12;
+            const angleX = variationX * maxRotation;
+            const angleY = variationY * maxRotation;
+            const angleZ = variationZ * maxRotation;
+        
+            const maxTranslation = 0.1;
+            const offsetX = variationX * maxTranslation;
+            const offsetY = variationY * maxTranslation;
+            const offsetZ = variationZ * maxTranslation;
+        
+            const maxScale = 0.2;
+            const scaleX = 1.0 + variationX * maxScale;
+            const scaleY = 1.0 + variationY * maxScale;
+            const scaleZ = 1.0 + variationZ * maxScale;
+            
+            // Center of rotation and scaling
+            const centerX = localX + 0.5;
+            const centerY = localY + 0.5;
+            const centerZ = localZ + 0.5;
+        
+            // Apply 3D rotation, translation, and scaling to each vertex
+            positions = positions.map(pos => {
+                const [x, y, z] = pos;
+        
+                // Translate to origin
+                const tx = x - centerX;
+                const ty = y - centerY;
+                const tz = z - centerZ;
+        
+                // Apply scaling
+                const sx = tx * scaleX;
+                const sy = ty * scaleY;
+                const sz = tz * scaleZ;
+        
+                // Rotation around X axis
+                const cosX = Math.cos(angleX);
+                const sinX = Math.sin(angleX);
+                const ry = sy * cosX - sz * sinX;
+                const rz = sy * sinX + sz * cosX;
+        
+                // Rotation around Y axis
+                const cosY = Math.cos(angleY);
+                const sinY = Math.sin(angleY);
+                const rx = sx * cosY + rz * sinY;
+                const rz2 = -sx * sinY + rz * cosY;
+        
+                // Rotation around Z axis
+                const cosZ = Math.cos(angleZ);
+                const sinZ = Math.sin(angleZ);
+                const rx2 = rx * cosZ - ry * sinZ;
+                const ry2 = rx * sinZ + ry * cosZ;
+        
+                // Translate back to original position and apply translation offsets
+                return [rx2 + centerX + offsetX, ry2 + centerY + offsetY, rz2 + centerZ + offsetZ];
+            });
         }
 
         // Calculate ambient occlusion for each vertex
@@ -2327,10 +2425,6 @@ function generateGeometry(chunkX, chunkZ, chunkData, adjacentChunks) {
                 const blockType = chunkData[x + z * CHUNK_SIZE + y * CHUNK_SIZE * CHUNK_SIZE];
                 if (blockType === 0) continue;
 
-                // Get neighbor information first
-                const worldX = chunkX * CHUNK_SIZE + x;
-                const worldZ = chunkZ * CHUNK_SIZE + z;
-
                 const neighbors = {
                     px: getBlockInWorld(chunkX, chunkZ, x + 1, y, z, chunkData, adjacentChunks),
                     nx: getBlockInWorld(chunkX, chunkZ, x - 1, y, z, chunkData, adjacentChunks),
@@ -2356,6 +2450,7 @@ function generateGeometry(chunkX, chunkZ, chunkData, adjacentChunks) {
 
 
                 const isWater = blockType === 5;
+                const isLeaf = blockType === 7;
                 const baseColor = hexToRGB(materials[blockType].color);
                 const colorMultipliers = getBlockVariation(
                     chunkX * CHUNK_SIZE + x,
@@ -2366,20 +2461,35 @@ function generateGeometry(chunkX, chunkZ, chunkData, adjacentChunks) {
                 const finalColor = isWater ? baseColor : // Use base color directly for water
                     baseColor.map((c, i) => Math.min(1, Math.max(0, c * colorMultipliers[i])));
 
-                // Generate faces with AO
-                if ((isWater && neighbors.px === 0) || (!isWater && isTransparent(neighbors.px)))
-                    addFace(isWater, [1, 0, 0], x, y, z, finalColor);
-                if ((isWater && neighbors.nx === 0) || (!isWater && isTransparent(neighbors.nx)))
-                    addFace(isWater, [-1, 0, 0], x, y, z, finalColor);
-                // Modified line for the top face (py) to check if the block above is transparent (air or water)
-                if ((isWater && neighbors.py === 0) || (!isWater && isTransparent(neighbors.py)))
-                    addFace(isWater, [0, 1, 0], x, y, z, finalColor);
-                if ((isWater && neighbors.ny === 0) || (!isWater && isTransparent(neighbors.ny)))
-                    addFace(isWater, [0, -1, 0], x, y, z, finalColor);
-                if ((isWater && neighbors.pz === 0) || (!isWater && isTransparent(neighbors.pz)))
-                    addFace(isWater, [0, 0, 1], x, y, z, finalColor);
-                if ((isWater && neighbors.nz === 0) || (!isWater && isTransparent(neighbors.nz)))
-                    addFace(isWater, [0, 0, -1], x, y, z, finalColor);
+                if (isLeaf) {
+                    // Render all faces for leaves and apply independent rotation
+                    if ((isWater && neighbors.px === 0) || (!isWater && isTransparent(neighbors.px)))
+                        addFace(isWater, [1, 0, 0], x, y, z, finalColor, true); // Right face
+                    if ((isWater && neighbors.nx === 0) || (!isWater && isTransparent(neighbors.nx)))
+                        addFace(isWater, [-1, 0, 0], x, y, z, finalColor, true); // Left face
+                    if ((isWater && neighbors.py === 0) || (!isWater && isTransparent(neighbors.py)))
+                        addFace(isWater, [0, 1, 0], x, y, z, finalColor, true); // Top face
+                    if ((isWater && neighbors.ny === 0) || (!isWater && isTransparent(neighbors.ny)))
+                        addFace(isWater, [0, -1, 0], x, y, z, finalColor, true); // Bottom face
+                    if ((isWater && neighbors.pz === 0) || (!isWater && isTransparent(neighbors.pz)))
+                        addFace(isWater, [0, 0, 1], x, y, z, finalColor, true); // Front face
+                    if ((isWater && neighbors.nz === 0) || (!isWater && isTransparent(neighbors.nz)))
+                        addFace(isWater, [0, 0, -1], x, y, z, finalColor, true); // Back face
+                } else {
+                    // Existing face checks for other block types
+                    if ((isWater && neighbors.px === 0) || (!isWater && isTransparent(neighbors.px)))
+                        addFace(isWater, [1, 0, 0], x, y, z, finalColor);
+                    if ((isWater && neighbors.nx === 0) || (!isWater && isTransparent(neighbors.nx)))
+                        addFace(isWater, [-1, 0, 0], x, y, z, finalColor);
+                    if ((isWater && neighbors.py === 0) || (!isWater && isTransparent(neighbors.py)))
+                        addFace(isWater, [0, 1, 0], x, y, z, finalColor);
+                    if ((isWater && neighbors.ny === 0) || (!isWater && isTransparent(neighbors.ny)))
+                        addFace(isWater, [0, -1, 0], x, y, z, finalColor);
+                    if ((isWater && neighbors.pz === 0) || (!isWater && isTransparent(neighbors.pz)))
+                        addFace(isWater, [0, 0, 1], x, y, z, finalColor);
+                    if ((isWater && neighbors.nz === 0) || (!isWater && isTransparent(neighbors.nz)))
+                        addFace(isWater, [0, 0, -1], x, y, z, finalColor);
+                }
             }
         }
     }
@@ -2451,7 +2561,7 @@ function getBlock(chunkData, x, y, z) {
 }
 
 function isTransparent(blockType) {
-    return blockType === 0 || blockType === 5;
+    return blockType === 0 || blockType === 5 || blockType === 7;
 }
 
 export default self;

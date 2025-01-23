@@ -26,7 +26,8 @@ export function checkCollision(entity, deltaTime) {
         for (let y = Math.floor(minY); y <= Math.floor(maxY); y++) {
             for (let z = Math.floor(minZ); z <= Math.floor(maxZ); z++) {
                 const block = getBlock(x, y, z);
-                if (block !== 0 && block !== 5) {
+                // Exclude air (0), water (5), and leaves (7) from collision checks
+                if (block !== 0 && block !== 5 && block !== 7) {
                     // Calculate overlap for each axis
                     const overlapX = Math.min(maxX - x, (x + 1) - minX);
                     const overlapY = Math.min(maxY - y, (y + 1) - minY);

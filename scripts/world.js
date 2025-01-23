@@ -49,14 +49,14 @@ const solidMaterial = new THREE.MeshLambertMaterial({ vertexColors: true });
 export const waterMaterial = new THREE.ShaderMaterial({
     uniforms: {
         time: { value: 0 },
-        waterColor: { value: new THREE.Color(0x5692cc) },
+        waterColor: { value: new THREE.Color(0x6fbffc) },
         lightDirection: { value: new THREE.Vector3(1, 1, 1).normalize() },
         waveScale: { value: .2 },
         fogColor: { value: new THREE.Color(0x619dde) },
         fogNear: { value: 20 },
         fogFar: { value: 300 },
         cameraPos: { value: new THREE.Vector3() }, // Added camera position
-        reflectionIntensity: { value: 0.4 } // New uniform for reflection control
+        reflectionIntensity: { value: 0.2 } // New uniform for reflection control
     },
     vertexShader: `
         varying vec3 vNormal;
@@ -193,9 +193,9 @@ export const waterMaterial = new THREE.ShaderMaterial({
         fresnel *= reflectionIntensity; // Control reflection strength
 
         // Base color gradient from displacement
-        float gradientFactor = smoothstep(-0.5, 0.5, vDisplacement);
-        vec3 darkColor = waterColor * 0.9;
-        vec3 lightColor = waterColor * 1.5;
+        float gradientFactor = smoothstep(-0.9, 0.9, vDisplacement);
+        vec3 darkColor = waterColor * 0.95;
+        vec3 lightColor = waterColor * 1.05;
         vec3 baseColor = mix(darkColor, lightColor, gradientFactor);
 
         // Specular highlights (Blinn-Phong model)
@@ -215,7 +215,7 @@ export const waterMaterial = new THREE.ShaderMaterial({
         finalColor = mix(finalColor, fogColor, fogFactor);
 
         // Alpha based on displacement
-        float alpha = 0.5 + 0.5 * abs(vDisplacement);
+        float alpha = 0.8 + 0.2 * abs(vDisplacement);
 
         gl_FragColor = vec4(finalColor, alpha);
     }

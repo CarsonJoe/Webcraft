@@ -285,7 +285,7 @@ function generateLargeTree(chunk, chunkX, chunkZ, worldX, worldZ, baseHeight) {
                     chunk, chunkX, chunkZ,
                     worldX + dx, worldZ + dz, y,
                     7, // Leaves
-                    0.3
+                    0.2
                 );
             }
         }
@@ -346,7 +346,7 @@ function generateBush(chunk, chunkX, chunkZ, worldX, worldZ, baseHeight) {
     for (let y = baseHeight; y < baseHeight + bushSize && y < CHUNK_HEIGHT; y++) {
         for (let dx = -1; dx <= 1; dx++) {
             for (let dz = -1; dz <= 1; dz++) {
-                if (Math.random() < 0.4) {
+                if (Math.random() < 0.2) {
                     setBlockIfInChunk(
                         chunk,
                         chunkX,
@@ -418,7 +418,7 @@ function generateSmallTree(chunk, chunkX, chunkZ, worldX, worldZ, baseHeight) {
                         worldZ + dz,
                         y,
                         7, // Leaves
-                        0.5 // 70% density
+                        0.2 // 70% density
                     );
                 }
             }

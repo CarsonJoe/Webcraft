@@ -15,8 +15,8 @@ function fastVariation(x, y, z) {
     seed ^= seed >> 7;
     seed ^= seed << 11;
 
-    // Get a more granular value by using more bits
-    return (seed & 0x3fffffff) / 0x3fffffff; // Using 30 bits instead of 31
+    // Map the result to the range [-1, 1]
+    return ((seed & 0x3fffffff) / 0x3fffffff) * 2 - 1;
 }
 
 function getBlockVariation(worldX, y, worldZ, blockType) {
@@ -50,7 +50,7 @@ function getBlockVariation(worldX, y, worldZ, blockType) {
 const VARIATION_CONFIG = {
     1: { // Grass
         scale: .2,     // Increase scale for more gradual changes
-        intensity: 0.08,
+        intensity: 0.06,
         channelBias: [0.9, 1.1, 0.9]
     },
     2: { // Dirt
@@ -75,7 +75,7 @@ const VARIATION_CONFIG = {
     },
     7: { // Leaves
         scale: .1,
-        intensity: 0.4,
+        intensity: 0.2,
         channelBias: [0.8, 1.2, 0.7]
     },
     8: { // Slate
@@ -136,11 +136,11 @@ function generateGeometry(chunkX, chunkZ, chunkData, adjacentChunks) {
     const water = { positions: [], normals: [], indices: [] };
 
     // Moved addFace inside generateGeometry and added AO calculations
-    const addFace = (isWater, normal, localX, localY, localZ, color) => {
+    const addFace = (isWater, normal, localX, localY, localZ, color, isLeaf = false) => {
         const target = isWater ? water : solid;
 
         // Vertex positions in world coordinates
-        const positions = [];
+        let positions = [];
         let aoValues = [];
 
         // Define face vertices based on normal
@@ -186,6 +186,74 @@ function generateGeometry(chunkX, chunkZ, chunkData, adjacentChunks) {
                 [localX + 1, localY + 1, localZ],
                 [localX + 1, localY, localZ]
             );
+        }
+
+        // Apply 3D rotation and translation for leaf blocks
+        if (isLeaf) {
+            const worldX = chunkX * CHUNK_SIZE + localX;
+            const worldZ = chunkZ * CHUNK_SIZE + localZ;
+        
+            // Generate base variations once per axis
+            const variationX = fastVariation(worldX + normal[0], localY + normal[1], worldZ + normal[2]);
+            const variationY = fastVariation(worldX + normal[1], localY + normal[2], worldZ + normal[0]);
+            const variationZ = fastVariation(worldX + normal[2], localY + normal[0], worldZ + normal[1]);
+        
+            // Apply variations to all transformations
+            const maxRotation = Math.PI / 12;
+            const angleX = variationX * maxRotation;
+            const angleY = variationY * maxRotation;
+            const angleZ = variationZ * maxRotation;
+        
+            const maxTranslation = 0.1;
+            const offsetX = variationX * maxTranslation;
+            const offsetY = variationY * maxTranslation;
+            const offsetZ = variationZ * maxTranslation;
+        
+            const maxScale = 0.2;
+            const scaleX = 1.0 + variationX * maxScale;
+            const scaleY = 1.0 + variationY * maxScale;
+            const scaleZ = 1.0 + variationZ * maxScale;
+            
+            // Center of rotation and scaling
+            const centerX = localX + 0.5;
+            const centerY = localY + 0.5;
+            const centerZ = localZ + 0.5;
+        
+            // Apply 3D rotation, translation, and scaling to each vertex
+            positions = positions.map(pos => {
+                const [x, y, z] = pos;
+        
+                // Translate to origin
+                const tx = x - centerX;
+                const ty = y - centerY;
+                const tz = z - centerZ;
+        
+                // Apply scaling
+                const sx = tx * scaleX;
+                const sy = ty * scaleY;
+                const sz = tz * scaleZ;
+        
+                // Rotation around X axis
+                const cosX = Math.cos(angleX);
+                const sinX = Math.sin(angleX);
+                const ry = sy * cosX - sz * sinX;
+                const rz = sy * sinX + sz * cosX;
+        
+                // Rotation around Y axis
+                const cosY = Math.cos(angleY);
+                const sinY = Math.sin(angleY);
+                const rx = sx * cosY + rz * sinY;
+                const rz2 = -sx * sinY + rz * cosY;
+        
+                // Rotation around Z axis
+                const cosZ = Math.cos(angleZ);
+                const sinZ = Math.sin(angleZ);
+                const rx2 = rx * cosZ - ry * sinZ;
+                const ry2 = rx * sinZ + ry * cosZ;
+        
+                // Translate back to original position and apply translation offsets
+                return [rx2 + centerX + offsetX, ry2 + centerY + offsetY, rz2 + centerZ + offsetZ];
+            });
         }
 
         // Calculate ambient occlusion for each vertex
@@ -254,10 +322,6 @@ function generateGeometry(chunkX, chunkZ, chunkData, adjacentChunks) {
                 const blockType = chunkData[x + z * CHUNK_SIZE + y * CHUNK_SIZE * CHUNK_SIZE];
                 if (blockType === 0) continue;
 
-                // Get neighbor information first
-                const worldX = chunkX * CHUNK_SIZE + x;
-                const worldZ = chunkZ * CHUNK_SIZE + z;
-
                 const neighbors = {
                     px: getBlockInWorld(chunkX, chunkZ, x + 1, y, z, chunkData, adjacentChunks),
                     nx: getBlockInWorld(chunkX, chunkZ, x - 1, y, z, chunkData, adjacentChunks),
@@ -283,6 +347,7 @@ function generateGeometry(chunkX, chunkZ, chunkData, adjacentChunks) {
 
 
                 const isWater = blockType === 5;
+                const isLeaf = blockType === 7;
                 const baseColor = hexToRGB(materials[blockType].color);
                 const colorMultipliers = getBlockVariation(
                     chunkX * CHUNK_SIZE + x,
@@ -293,20 +358,35 @@ function generateGeometry(chunkX, chunkZ, chunkData, adjacentChunks) {
                 const finalColor = isWater ? baseColor : // Use base color directly for water
                     baseColor.map((c, i) => Math.min(1, Math.max(0, c * colorMultipliers[i])));
 
-                // Generate faces with AO
-                if ((isWater && neighbors.px === 0) || (!isWater && isTransparent(neighbors.px)))
-                    addFace(isWater, [1, 0, 0], x, y, z, finalColor);
-                if ((isWater && neighbors.nx === 0) || (!isWater && isTransparent(neighbors.nx)))
-                    addFace(isWater, [-1, 0, 0], x, y, z, finalColor);
-                // Modified line for the top face (py) to check if the block above is transparent (air or water)
-                if ((isWater && neighbors.py === 0) || (!isWater && isTransparent(neighbors.py)))
-                    addFace(isWater, [0, 1, 0], x, y, z, finalColor);
-                if ((isWater && neighbors.ny === 0) || (!isWater && isTransparent(neighbors.ny)))
-                    addFace(isWater, [0, -1, 0], x, y, z, finalColor);
-                if ((isWater && neighbors.pz === 0) || (!isWater && isTransparent(neighbors.pz)))
-                    addFace(isWater, [0, 0, 1], x, y, z, finalColor);
-                if ((isWater && neighbors.nz === 0) || (!isWater && isTransparent(neighbors.nz)))
-                    addFace(isWater, [0, 0, -1], x, y, z, finalColor);
+                if (isLeaf) {
+                    // Render all faces for leaves and apply independent rotation
+                    if ((isWater && neighbors.px === 0) || (!isWater && isTransparent(neighbors.px)))
+                        addFace(isWater, [1, 0, 0], x, y, z, finalColor, true); // Right face
+                    if ((isWater && neighbors.nx === 0) || (!isWater && isTransparent(neighbors.nx)))
+                        addFace(isWater, [-1, 0, 0], x, y, z, finalColor, true); // Left face
+                    if ((isWater && neighbors.py === 0) || (!isWater && isTransparent(neighbors.py)))
+                        addFace(isWater, [0, 1, 0], x, y, z, finalColor, true); // Top face
+                    if ((isWater && neighbors.ny === 0) || (!isWater && isTransparent(neighbors.ny)))
+                        addFace(isWater, [0, -1, 0], x, y, z, finalColor, true); // Bottom face
+                    if ((isWater && neighbors.pz === 0) || (!isWater && isTransparent(neighbors.pz)))
+                        addFace(isWater, [0, 0, 1], x, y, z, finalColor, true); // Front face
+                    if ((isWater && neighbors.nz === 0) || (!isWater && isTransparent(neighbors.nz)))
+                        addFace(isWater, [0, 0, -1], x, y, z, finalColor, true); // Back face
+                } else {
+                    // Existing face checks for other block types
+                    if ((isWater && neighbors.px === 0) || (!isWater && isTransparent(neighbors.px)))
+                        addFace(isWater, [1, 0, 0], x, y, z, finalColor);
+                    if ((isWater && neighbors.nx === 0) || (!isWater && isTransparent(neighbors.nx)))
+                        addFace(isWater, [-1, 0, 0], x, y, z, finalColor);
+                    if ((isWater && neighbors.py === 0) || (!isWater && isTransparent(neighbors.py)))
+                        addFace(isWater, [0, 1, 0], x, y, z, finalColor);
+                    if ((isWater && neighbors.ny === 0) || (!isWater && isTransparent(neighbors.ny)))
+                        addFace(isWater, [0, -1, 0], x, y, z, finalColor);
+                    if ((isWater && neighbors.pz === 0) || (!isWater && isTransparent(neighbors.pz)))
+                        addFace(isWater, [0, 0, 1], x, y, z, finalColor);
+                    if ((isWater && neighbors.nz === 0) || (!isWater && isTransparent(neighbors.nz)))
+                        addFace(isWater, [0, 0, -1], x, y, z, finalColor);
+                }
             }
         }
     }
@@ -378,7 +458,7 @@ function getBlock(chunkData, x, y, z) {
 }
 
 function isTransparent(blockType) {
-    return blockType === 0 || blockType === 5;
+    return blockType === 0 || blockType === 5 || blockType === 7;
 }
 
 export default self;
