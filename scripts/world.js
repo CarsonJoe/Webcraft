@@ -46,11 +46,186 @@ const materials = {
 };
 
 const solidMaterial = new THREE.MeshLambertMaterial({ vertexColors: true });
-const waterMaterial = new THREE.MeshPhongMaterial({
-    color: 0x6380ec,
+// When creating the water material
+export const waterMaterial = new THREE.ShaderMaterial({
+    uniforms: {
+        time: { value: 0 },
+        waterColor: { value: new THREE.Color(0x6380ec) },
+        lightDirection: { value: new THREE.Vector3(1, 1, 1).normalize() },
+        waveSpeed: { value: 0.7 },
+        waveScale: { value: 1.5 },
+    },
+    vertexShader: `
+        varying vec3 vPosition;
+        varying vec3 vNormal;
+        varying vec2 vUv;
+        uniform float time;
+        uniform float waveSpeed;
+        uniform float waveScale;
+        varying float vDisplacement;
+
+        // Classic Perlin noise implementation
+        vec4 permute(vec4 x) { return mod(((x*34.0)+1.0)*x, 289.0); }
+        vec4 taylorInvSqrt(vec4 r) { return 1.79284291400159 - 0.85373472095314 * r; }
+        
+        float noise(vec3 P) {
+            vec3 Pi0 = floor(P); // Integer part for indexing
+            vec3 Pi1 = Pi0 + vec3(1.0); // Integer part + 1
+            vec3 Pf0 = fract(P); // Fractional part for interpolation
+            vec3 Pf1 = Pf0 - vec3(1.0); // Fractional part - 1.0
+            vec4 ix = vec4(Pi0.x, Pi1.x, Pi0.x, Pi1.x);
+            vec4 iy = vec4(Pi0.yy, Pi1.yy);
+            vec4 iz0 = Pi0.zzzz;
+            vec4 iz1 = Pi1.zzzz;
+
+            vec4 ixy = permute(permute(ix) + iy);
+            vec4 ixy0 = permute(ixy + iz0);
+            vec4 ixy1 = permute(ixy + iz1);
+
+            vec4 gx0 = ixy0 / 7.0;
+            vec4 gy0 = fract(floor(gx0) / 7.0) - 0.5;
+            gx0 = fract(gx0);
+            vec4 gz0 = vec4(0.5) - abs(gx0) - abs(gy0);
+            vec4 sz0 = step(gz0, vec4(0.0));
+            gx0 -= sz0 * (step(0.0, gx0) - 0.5);
+            gy0 -= sz0 * (step(0.0, gy0) - 0.5);
+
+            vec4 gx1 = ixy1 / 7.0;
+            vec4 gy1 = fract(floor(gx1) / 7.0) - 0.5;
+            gx1 = fract(gx1);
+            vec4 gz1 = vec4(0.5) - abs(gx1) - abs(gy1);
+            vec4 sz1 = step(gz1, vec4(0.0));
+            gx1 -= sz1 * (step(0.0, gx1) - 0.5);
+            gy1 -= sz1 * (step(0.0, gy1) - 0.5);
+
+            vec3 g000 = vec3(gx0.x,gy0.x,gz0.x);
+            vec3 g100 = vec3(gx0.y,gy0.y,gz0.y);
+            vec3 g010 = vec3(gx0.z,gy0.z,gz0.z);
+            vec3 g110 = vec3(gx0.w,gy0.w,gz0.w);
+            vec3 g001 = vec3(gx1.x,gy1.x,gz1.x);
+            vec3 g101 = vec3(gx1.y,gy1.y,gz1.y);
+            vec3 g011 = vec3(gx1.z,gy1.z,gz1.z);
+            vec3 g111 = vec3(gx1.w,gy1.w,gz1.w);
+
+            vec4 norm0 = taylorInvSqrt(vec4(dot(g000, g000), dot(g010, g010), dot(g100, g100), dot(g110, g110)));
+            g000 *= norm0.x;
+            g010 *= norm0.y;
+            g100 *= norm0.z;
+            g110 *= norm0.w;
+
+            vec4 norm1 = taylorInvSqrt(vec4(dot(g001, g001), dot(g011, g011), dot(g101, g101), dot(g111, g111)));
+            g001 *= norm1.x;
+            g011 *= norm1.y;
+            g101 *= norm1.z;
+            g111 *= norm1.w;
+
+            float n000 = dot(g000, Pf0);
+            float n100 = dot(g100, vec3(Pf1.x, Pf0.yz));
+            float n010 = dot(g010, vec3(Pf0.x, Pf1.y, Pf0.z));
+            float n110 = dot(g110, vec3(Pf1.xy, Pf0.z));
+            float n001 = dot(g001, vec3(Pf0.xy, Pf1.z));
+            float n101 = dot(g101, vec3(Pf1.x, Pf0.y, Pf1.z));
+            float n011 = dot(g011, vec3(Pf0.x, Pf1.yz));
+            float n111 = dot(g111, Pf1);
+
+            vec3 fade_xyz = Pf0 * Pf0 * Pf0 * (Pf0 * (Pf0 * 6.0 - 15.0) + 10.0);
+            vec4 n_z = mix(vec4(n000, n100, n010, n110), vec4(n001, n101, n011, n111), fade_xyz.z);
+            vec2 n_yz = mix(n_z.xy, n_z.zw, fade_xyz.y);
+            float n_xyz = mix(n_yz.x, n_yz.y, fade_xyz.x); 
+            return 2.2 * n_xyz;
+        }
+
+        void main() {
+            vUv = uv;
+            vec4 worldPosition = modelMatrix * vec4(position, 1.0);
+            float worldX = worldPosition.x;
+            float worldZ = worldPosition.z;
+            
+            // Base large swells (low frequency)
+            float swell = noise(vec3(worldX * 0.15, worldZ * 0.15, time * 0.1)) * 0.4;
+            
+            // Medium waves with directional component
+            vec2 mediumWaveDir = vec2(0.8, 0.6);
+            float mediumWave = noise(vec3(
+                (worldX * mediumWaveDir.x + worldZ * mediumWaveDir.y) * 0.4 + time * 0.3,
+                (worldZ * mediumWaveDir.x - worldX * mediumWaveDir.y) * 0.4,
+                time * 0.2
+            )) * 0.3;
+            
+            // High frequency detail
+            float detail = noise(vec3(worldX * 1.5, worldZ * 1.5, time * 0.5)) * 0.2;
+            
+            // Combine layers with varying speeds
+            float displacement = (swell * 0.7 + mediumWave * 0.5 + detail * 0.3) * waveScale;
+            
+            
+            vDisplacement = displacement;
+
+            // Add some sine waves for rhythm
+            displacement += sin(worldX * 0.3 + time * 1.2) * 0.1 * waveScale;
+            displacement += sin(worldZ * 0.4 + time * 1.5) * 0.08 * waveScale;
+            
+            vec3 pos = position;
+            pos.y += displacement;
+
+            // Calculate normals using noise derivatives
+            float eps = 0.1;
+            float dx = noise(vec3((worldX + eps) * 0.15, worldZ * 0.15, time * 0.1)) * 0.4 -
+                    noise(vec3((worldX - eps) * 0.15, worldZ * 0.15, time * 0.1)) * 0.4;
+                    
+            float dz = noise(vec3(worldX * 0.15, (worldZ + eps) * 0.15, time * 0.1)) * 0.4 -
+                    noise(vec3(worldX * 0.15, (worldZ - eps) * 0.15, time * 0.1)) * 0.4;
+
+            vNormal = normalize(vec3(-dx * 2.0, 1.0, -dz * 2.0));
+            vPosition = pos;
+
+            gl_Position = projectionMatrix * modelViewMatrix * vec4(pos, 1.0);
+        }
+    `,
+    fragmentShader: `// Fragment Shader
+        varying vec3 vPosition;
+        varying vec3 vNormal;
+        varying vec2 vUv;
+        varying float vDisplacement;
+        uniform vec3 waterColor;
+        uniform vec3 lightDirection;
+        uniform float time;
+
+        void main() {
+            vec3 normal = normalize(vNormal);
+            vec3 lightDir = normalize(lightDirection);
+            vec3 viewDir = normalize(cameraPosition - vPosition);
+            float diffuse = max(dot(normal, lightDir), 0.2);
+            vec3 reflectDir = reflect(-lightDir, normal);
+            float specularPower = 32.0 + sin(time * 2.0) * 8.0;
+            float specular = pow(max(dot(viewDir, reflectDir), 0.0), specularPower);
+            float fresnel = pow(1.0 - dot(normal, viewDir), 2.0);
+            float alpha = 0.7 * (1.0 - fresnel * 0.5);
+
+            // Gradient calculation (dark to light based on displacement)
+            vec3 darkWater = waterColor * 0.6;
+            vec3 lightWater = waterColor * 1.4;
+            float gradientFactor = smoothstep(-0.3, 0.5, vDisplacement);
+            vec3 gradientColor = mix(darkWater, lightWater, gradientFactor);
+
+            // Base color with lighting
+            vec3 color = gradientColor * (diffuse + specular * 0.3);
+
+            // Foam effect (white highlights on peaks)
+            float foam = smoothstep(0.2, 0.35, vDisplacement);
+            vec3 foamColor = mix(gradientColor, vec3(1.0), 0.9);
+            color = mix(color, foamColor * 1.3, foam * 0.6);
+
+            // Specular and fresnel adjustments
+            color += specular * (0.3 + 0.1 * sin(time * 3.0));
+            color = mix(color, vec3(1.0), fresnel * 0.3);
+
+            gl_FragColor = vec4(color, alpha);
+        }
+    `,
     transparent: true,
-    opacity: 0.7,
-    side: THREE.DoubleSide
+    side: THREE.DoubleSide,
+    depthWrite: false
 });
 
 // Initialize world systems
@@ -59,7 +234,7 @@ export function initWorld() {
     const SEED = Math.random() * 1000000;
     console.log(`[World] Using seed: ${SEED}`);
 
-    
+
     addToLoadQueue(0, 0, 0);
 
     // Generate initial spawn point at chunk (0,0)
@@ -73,7 +248,7 @@ export function initWorld() {
         seed: SEED
     });
 
-    geometryWorker.onmessage = function(e) {
+    geometryWorker.onmessage = function (e) {
         if (e.data.type === 'geometry_data') {
             createChunkMeshes(e.data.chunkX, e.data.chunkZ, e.data.solid, e.data.water);
         }
@@ -84,7 +259,7 @@ export function initWorld() {
     });
     console.log("[World] Web Worker created");
 
-    chunkWorker.onmessage = function(e) {
+    chunkWorker.onmessage = function (e) {
         if (e.data.type === 'init_complete') {
             workerInitialized = true;
             checkInitialization();
@@ -94,20 +269,20 @@ export function initWorld() {
         } else if (e.data.type === 'chunk_data') {
             const { chunkX, chunkZ, chunkData } = e.data;
             const chunkKey = `${chunkX},${chunkZ}`;
-    
+
             // 1. Clone the received buffer for main thread storage
             const clonedBuffer = new ArrayBuffer(chunkData.byteLength);
             new Int8Array(clonedBuffer).set(new Int8Array(chunkData));
-            
+
             // 2. Store cloned buffer in chunks
             chunks[chunkKey] = new Int8Array(clonedBuffer);
             chunkStates[chunkKey] = CHUNK_LOADED;
-    
+
             // 3. Prepare adjacent chunks with fresh buffers
             const transferList = [chunkData]; // Transfer original buffer
             const adjacentChunks = {};
-    
-            [[1,0], [-1,0], [0,1], [0,-1]].forEach(([dx, dz]) => {
+
+            [[1, 0], [-1, 0], [0, 1], [0, -1]].forEach(([dx, dz]) => {
                 const adjKey = `${chunkX + dx},${chunkZ + dz}`;
                 if (chunks[adjKey]) {
                     // Clone adjacent chunk's buffer for transfer
@@ -117,7 +292,7 @@ export function initWorld() {
                     transferList.push(adjClone);
                 }
             });
-    
+
             // 4. Send message with transferrable buffers
             geometryWorker.postMessage({
                 type: 'process_chunk',
@@ -126,7 +301,7 @@ export function initWorld() {
                 chunkData: chunkData,
                 adjacentChunks
             }, transferList);
-    
+
             updateAdjacentChunks(chunkX, chunkZ);
         }
     };
@@ -179,17 +354,17 @@ function createChunkMeshes(chunkX, chunkZ, solidData, waterData) {
 
 function createGeometryFromData(data) {
     const geometry = new THREE.BufferGeometry();
-    
+
     geometry.setAttribute('position', new THREE.BufferAttribute(data.positions, 3));
     geometry.setAttribute('normal', new THREE.BufferAttribute(data.normals, 3));
-    
+
     if (data.colors) {
         geometry.setAttribute('color', new THREE.BufferAttribute(data.colors, 3));
     }
-    
+
     geometry.setIndex(new THREE.BufferAttribute(data.indices, 1));
     geometry.computeBoundingSphere();
-    
+
     return geometry;
 }
 
@@ -230,31 +405,31 @@ function addToLoadQueue(x, z, priority = Infinity) {
     const chunkKey = `${x},${z}`;
     const dx = x - currentPlayerChunkX;
     const dz = z - currentPlayerChunkZ;
-    
+
     // 1. Skip out-of-bounds chunks
     if (Math.abs(dx) > RENDER_DISTANCE + 1 || Math.abs(dz) > RENDER_DISTANCE + 1) return;
-    
+
     // 2. Skip if already queued
     if (queuedChunks.has(chunkKey)) return;
-    
+
     // 3. Add to queue and tracking set
     const distanceSq = dx * dx + dz * dz;
     chunkLoadQueue.push({ x, z, priority, distanceSq });
     queuedChunks.add(chunkKey);
-    
+
     // 4. Maintain heap property (O(log n) insertion)
     let index = chunkLoadQueue.length - 1;
     while (index > 0) {
-      const parentIndex = Math.floor((index - 1) / 2);
-      if (
-        chunkLoadQueue[parentIndex].priority < chunkLoadQueue[index].priority ||
-        (chunkLoadQueue[parentIndex].priority === chunkLoadQueue[index].priority &&
-          chunkLoadQueue[parentIndex].distanceSq <= chunkLoadQueue[index].distanceSq)
-      ) break;
-      [chunkLoadQueue[parentIndex], chunkLoadQueue[index]] = [chunkLoadQueue[index], chunkLoadQueue[parentIndex]];
-      index = parentIndex;
+        const parentIndex = Math.floor((index - 1) / 2);
+        if (
+            chunkLoadQueue[parentIndex].priority < chunkLoadQueue[index].priority ||
+            (chunkLoadQueue[parentIndex].priority === chunkLoadQueue[index].priority &&
+                chunkLoadQueue[parentIndex].distanceSq <= chunkLoadQueue[index].distanceSq)
+        ) break;
+        [chunkLoadQueue[parentIndex], chunkLoadQueue[index]] = [chunkLoadQueue[index], chunkLoadQueue[parentIndex]];
+        index = parentIndex;
     }
-  }
+}
 
 function processChunkQueue() {
     if (!workerInitialized || !sceneReady) return;
@@ -270,28 +445,28 @@ function processChunkQueue() {
     } else {
         frameBudget -= timeSinceLastFrame - 16; // We're running behind
     }
-    
+
     // Keep frame budget within reasonable bounds
     frameBudget = Math.max(8, Math.min(32, frameBudget));
 
     const startTime = performance.now();
     let processed = 0;
-    
+
     while (chunkLoadQueue.length > 0 && processed < MAX_CHUNKS_PER_FRAME) {
         const { x, z } = chunkLoadQueue.shift();
         queuedChunks.delete(`${x},${z}`);
         const chunkKey = `${x},${z}`;
-        
+
         if (!chunks[chunkKey] && chunkStates[chunkKey] !== CHUNK_LOADING) {
             chunkStates[chunkKey] = CHUNK_LOADING;
             chunkWorker.postMessage({ chunkX: x, chunkZ: z });
             processed++;
         }
-        
+
         // Check if we've exceeded our frame budget
         if (performance.now() - startTime > frameBudget) break;
     }
-    
+
     // If there are still chunks to process, schedule next frame
     if (chunkLoadQueue.length > 0) {
         requestAnimationFrame(processChunkQueue);
@@ -370,7 +545,7 @@ function sendChunkToGeometryWorker(chunkX, chunkZ) {
     const clonedChunkData = new Int8Array(chunkData).buffer;
 
     const adjacentChunks = {};
-    [[1,0], [-1,0], [0,1], [0,-1]].forEach(([dx, dz]) => {
+    [[1, 0], [-1, 0], [0, 1], [0, -1]].forEach(([dx, dz]) => {
         const adjChunkX = chunkX + dx;
         const adjChunkZ = chunkZ + dz;
         const adjKey = `${adjChunkX},${adjChunkZ}`;
@@ -431,7 +606,7 @@ function updateChunks(playerPosition) {
             const [x, z] = chunkKey.split(',').map(Number);
             const dx = x - currentPlayerChunkX;
             const dz = z - currentPlayerChunkZ;
-            
+
             if (Math.abs(dx) > buffer || Math.abs(dz) > buffer) {
                 removeChunkGeometry(x, z);
                 cleanupChunkData(chunkKey);
@@ -453,10 +628,12 @@ function findSuitableSpawnPoint(chunkX, chunkZ) {
     const chunkKey = `${chunkX},${chunkZ}`;
     if (!chunks[chunkKey]) {
         // Changed from Infinity to 0 for highest priority
-        addToLoadQueue(chunkX, chunkZ, 0); 
-        return { x: chunkX * CHUNK_SIZE + CHUNK_SIZE / 2, 
-                 y: CHUNK_HEIGHT, // Start at top
-                 z: chunkZ * CHUNK_SIZE + CHUNK_SIZE / 2 };
+        addToLoadQueue(chunkX, chunkZ, 0);
+        return {
+            x: chunkX * CHUNK_SIZE + CHUNK_SIZE / 2,
+            y: CHUNK_HEIGHT, // Start at top
+            z: chunkZ * CHUNK_SIZE + CHUNK_SIZE / 2
+        };
     }
 
     const centerX = Math.floor(CHUNK_SIZE / 2);

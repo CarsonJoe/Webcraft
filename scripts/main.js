@@ -1,6 +1,6 @@
 import Player from './player.js';
 import { CHUNK_HEIGHT } from './constants.js';
-import { updateChunks, setBlock, getBlock, chunks } from './world.js';
+import { updateChunks, setBlock, getBlock, waterMaterial } from './world.js';
 import { initWorld, notifySceneReady, initializationComplete } from './world.js';
 import { createSkybox, initRenderer, render } from './renderer.js';
 import { updateBlockSelector } from './utils.js';
@@ -209,6 +209,12 @@ function animate() {
 
     if (cloudMaterial) {
         cloudMaterial.uniforms.time.value = performance.now() / 1000;
+    }
+
+    // Update water material uniforms
+    if (waterMaterial && waterMaterial.uniforms && waterMaterial.uniforms.time) {
+        waterMaterial.uniforms.time.value = performance.now() / 1000;
+        waterMaterial.uniforms.lightDirection.value.copy(directionalLight.position).normalize();
     }
 
     Player.update(getBlock);

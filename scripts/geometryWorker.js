@@ -294,23 +294,19 @@ function generateGeometry(chunkX, chunkZ, chunkData, adjacentChunks) {
                     baseColor.map((c, i) => Math.min(1, Math.max(0, c * colorMultipliers[i])));
 
                 // Generate faces with AO
-                if (isWater) {
-                    // Water faces should render if neighbor is not water
-                    if (neighbors.px !== 5) addFace(isWater, [1, 0, 0], x, y, z, finalColor);
-                    if (neighbors.nx !== 5) addFace(isWater, [-1, 0, 0], x, y, z, finalColor);
-                    if (neighbors.py !== 5) addFace(isWater, [0, 1, 0], x, y, z, finalColor);
-                    if (neighbors.ny !== 5) addFace(isWater, [0, -1, 0], x, y, z, finalColor);
-                    if (neighbors.pz !== 5) addFace(isWater, [0, 0, 1], x, y, z, finalColor);
-                    if (neighbors.nz !== 5) addFace(isWater, [0, 0, -1], x, y, z, finalColor);
-                } else {
-                    // Solid blocks render faces if neighbor is transparent (air/water)
-                    if (isTransparent(neighbors.px)) addFace(isWater, [1, 0, 0], x, y, z, finalColor);
-                    if (isTransparent(neighbors.nx)) addFace(isWater, [-1, 0, 0], x, y, z, finalColor);
-                    if (isTransparent(neighbors.py)) addFace(isWater, [0, 1, 0], x, y, z, finalColor);
-                    if (isTransparent(neighbors.ny)) addFace(isWater, [0, -1, 0], x, y, z, finalColor);
-                    if (isTransparent(neighbors.pz)) addFace(isWater, [0, 0, 1], x, y, z, finalColor);
-                    if (isTransparent(neighbors.nz)) addFace(isWater, [0, 0, -1], x, y, z, finalColor);
-                }
+                if ((isWater && neighbors.px === 0) || (!isWater && isTransparent(neighbors.px)))
+                    addFace(isWater, [1, 0, 0], x, y, z, finalColor);
+                if ((isWater && neighbors.nx === 0) || (!isWater && isTransparent(neighbors.nx)))
+                    addFace(isWater, [-1, 0, 0], x, y, z, finalColor);
+                // Modified line for the top face (py) to check if the block above is transparent (air or water)
+                if (isTransparent(neighbors.py))
+                    addFace(isWater, [0, 1, 0], x, y, z, finalColor);
+                if ((isWater && neighbors.ny === 0) || (!isWater && isTransparent(neighbors.ny)))
+                    addFace(isWater, [0, -1, 0], x, y, z, finalColor);
+                if ((isWater && neighbors.pz === 0) || (!isWater && isTransparent(neighbors.pz)))
+                    addFace(isWater, [0, 0, 1], x, y, z, finalColor);
+                if ((isWater && neighbors.nz === 0) || (!isWater && isTransparent(neighbors.nz)))
+                    addFace(isWater, [0, 0, -1], x, y, z, finalColor);
             }
         }
     }

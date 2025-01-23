@@ -78,7 +78,7 @@ File: ./scripts/main.js
 
 import Player from './player.js';
 import { CHUNK_HEIGHT } from './constants.js';
-import { updateChunks, setBlock, getBlock, chunks } from './world.js';
+import { updateChunks, setBlock, getBlock, waterMaterial } from './world.js';
 import { initWorld, notifySceneReady, initializationComplete } from './world.js';
 import { createSkybox, initRenderer, render } from './renderer.js';
 import { updateBlockSelector } from './utils.js';
@@ -287,6 +287,12 @@ function animate() {
 
     if (cloudMaterial) {
         cloudMaterial.uniforms.time.value = performance.now() / 1000;
+    }
+
+    // Update water material uniforms
+    if (waterMaterial && waterMaterial.uniforms && waterMaterial.uniforms.time) {
+        waterMaterial.uniforms.time.value = performance.now() / 1000;
+        waterMaterial.uniforms.lightDirection.value.copy(directionalLight.position).normalize();
     }
 
     Player.update(getBlock);
@@ -934,11 +940,82 @@ const materials = {
 };
 
 const solidMaterial = new THREE.MeshLambertMaterial({ vertexColors: true });
-const waterMaterial = new THREE.MeshPhongMaterial({
-    color: 0x6380ec,
+// When creating the water material
+export const waterMaterial = new THREE.ShaderMaterial({
+    uniforms: {
+        time: { value: 0 },
+        waterColor: { value: new THREE.Color(0x6380ec) },
+        lightDirection: { value: new THREE.Vector3(1, 1, 1).normalize() },
+        waveSpeed: { value: 0.7 },
+        waveScale: { value: 0.8 }
+    },
+    vertexShader: `
+        varying vec3 vPosition;
+        varying vec3 vNormal;
+        varying vec2 vUv;
+        uniform float time;
+        uniform float waveSpeed;
+        uniform float waveScale;
+
+        void main() {
+            vUv = uv;
+            vec3 pos = position;
+            
+            // Wave displacement using multiple sine waves
+            float displacement = 
+                sin(pos.x * 2.0 + time * waveSpeed) * waveScale * 0.2 +
+                sin(pos.z * 1.5 + time * waveSpeed * 1.2) * waveScale * 0.15 +
+                sin(pos.x * 3.0 + pos.z * 2.0 + time * waveSpeed * 0.8) * waveScale * 0.1;
+            
+            pos.y += displacement;
+
+            // Calculate normal using partial derivatives
+            float dx = cos(pos.x * 2.0 + time * waveSpeed) * 2.0 * waveScale * 0.2 +
+                      cos(pos.x * 3.0 + pos.z * 2.0 + time * waveSpeed * 0.8) * 3.0 * waveScale * 0.1;
+            
+            float dz = cos(pos.z * 1.5 + time * waveSpeed * 1.2) * 1.5 * waveScale * 0.15 +
+                      cos(pos.x * 3.0 + pos.z * 2.0 + time * waveSpeed * 0.8) * 2.0 * waveScale * 0.1;
+
+            vNormal = normalize(vec3(-dx, 1.0, -dz));
+            vPosition = pos;
+
+            gl_Position = projectionMatrix * modelViewMatrix * vec4(pos, 1.0);
+        }
+    `,
+    fragmentShader: `
+        varying vec3 vPosition;
+        varying vec3 vNormal;
+        varying vec2 vUv;
+        uniform vec3 waterColor;
+        uniform vec3 lightDirection;
+
+        void main() {
+            // Normalize inputs
+            vec3 normal = normalize(vNormal);
+            vec3 lightDir = normalize(lightDirection);
+            vec3 viewDir = normalize(cameraPosition - vPosition); // Uses built-in uniform
+
+            // Diffuse lighting
+            float diffuse = max(dot(normal, lightDir), 0.2);
+
+            // Specular reflection
+            vec3 reflectDir = reflect(-lightDir, normal);
+            float specular = pow(max(dot(viewDir, reflectDir), 0.0), 32.0);
+
+            // Fresnel effect
+            float fresnel = pow(1.0 - dot(normal, viewDir), 2.0);
+            float alpha = 0.7 * (1.0 - fresnel * 0.5);
+
+            // Combine effects
+            vec3 color = waterColor * (diffuse + specular * 0.3);
+            color = mix(color, vec3(1.0), fresnel * 0.2); // Add fresnel tint
+
+            gl_FragColor = vec4(color, alpha);
+        }
+    `,
     transparent: true,
-    opacity: 0.7,
-    side: THREE.DoubleSide
+    side: THREE.DoubleSide,
+    depthWrite: false
 });
 
 // Initialize world systems
@@ -1397,7 +1474,7 @@ File: ./index.html
 </head>
 <body>
     <div id="cursor"></div>
-    <div id="block-selector"></div>
+    <!-- <div id="block-selector"></div> -->
     <script type="module" src="scripts/utils.js"></script>
     <script type="module" src="scripts/world.js"></script>
     <script type="module" src="scripts/player.js"></script>
