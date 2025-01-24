@@ -353,7 +353,6 @@ function updateDebugUI() {
 
     const memoryStats = [
         `Geometry: ${metrics.memory.geometry}MB`,
-        `Textures: ${metrics.memory.textures}MB`,
         `Total: ${metrics.memory.total}MB`
     ];
 
@@ -2542,6 +2541,8 @@ function generateGeometry(chunkX, chunkZ, chunkData, adjacentChunks) {
             }
         }
     }
+
+    console.log("[Geometry Worker] Geometry Generated");
 
     return {
         chunkX,

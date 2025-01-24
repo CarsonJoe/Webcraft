@@ -21,6 +21,7 @@ const UPDATE_COOLDOWN = 100; // ms
 const chunks = {};
 const chunkStates = {};
 const queuedChunks = new Set(); // Track chunk keys like "x,z"
+let remeshQueue = new Set();
 const chunkLoadQueue = [];      // Use as a priority queue (heap)
 const blockColors = new Map();
 
@@ -250,7 +251,10 @@ export function initWorld() {
         if (e.data.type === 'geometry_data') {
             try {
                 profiler.endTimer('meshGeneration');
-                profiler.trackChunkMeshed();
+                // Only track meshing when geometry is actually created
+                if (e.data.solid.positions.length > 0 || e.data.water.positions.length > 0) {
+                    profiler.trackChunkMeshed();
+                }
                 createChunkMeshes(e.data.chunkX, e.data.chunkZ, e.data.solid, e.data.water);
             } catch (error) {
                 console.error('Error processing geometry:', error);
@@ -440,24 +444,22 @@ function processChunkQueue() {
     if (!workerInitialized || !sceneReady) return;
     profiler.startTimer('chunkProcessing');
 
-    // Calculate time since last frame and adjust budget
     const now = performance.now();
     const timeSinceLastFrame = now - lastFrameTime;
     lastFrameTime = now;
 
-    // Adjust frame budget based on actual frame time
     if (timeSinceLastFrame < 16) {
-        frameBudget += 16 - timeSinceLastFrame; // We have extra time
+        frameBudget += 16 - timeSinceLastFrame;
     } else {
-        frameBudget -= timeSinceLastFrame - 16; // We're running behind
+        frameBudget -= timeSinceLastFrame - 16;
     }
 
-    // Keep frame budget within reasonable bounds
     frameBudget = Math.max(8, Math.min(32, frameBudget));
 
     const startTime = performance.now();
     let processed = 0;
 
+    // Process load queue first
     while (chunkLoadQueue.length > 0 && processed < MAX_CHUNKS_PER_FRAME) {
         const { x, z } = chunkLoadQueue.shift();
         queuedChunks.delete(`${x},${z}`);
@@ -470,14 +472,68 @@ function processChunkQueue() {
             profiler.trackChunkGenerated();
         }
 
-        // Check if we've exceeded our frame budget
         if (performance.now() - startTime > frameBudget) break;
     }
 
-    // If there are still chunks to process, schedule next frame
-    if (chunkLoadQueue.length > 0) {
+    // Process remesh queue
+    remeshQueue.forEach(chunkKey => {
+        const [x, z] = chunkKey.split(',').map(Number);
+        if (!chunks[chunkKey]) {
+            remeshQueue.delete(chunkKey);
+            return;
+        }
+    
+        // Add adjacency check to prevent unnecessary remeshing
+        const isEdgeChunk = 
+            x === currentPlayerChunkX - RENDER_DISTANCE ||
+            x === currentPlayerChunkX + RENDER_DISTANCE ||
+            z === currentPlayerChunkZ - RENDER_DISTANCE ||
+            z === currentPlayerChunkZ + RENDER_DISTANCE;
+    
+        if (!isEdgeChunk) {
+            // Check if all neighbors are loaded
+            const neighborsLoaded = [[1,0], [-1,0], [0,1], [0,-1]].every(([dx, dz]) => {
+                const neighborKey = `${x+dx},${z+dz}`;
+                return chunks[neighborKey] && chunkStates[neighborKey] === CHUNK_LOADED;
+            });
+    
+            if (!neighborsLoaded) return;
+        }
+    
+        profiler.startTimer('meshGeneration');
+        const chunkData = chunks[chunkKey];
+        const clonedChunkData = new Int8Array(chunkData).buffer;
+
+        const adjacentChunks = {};
+        [[1, 0], [-1, 0], [0, 1], [0, -1]].forEach(([dx, dz]) => {
+            const adjChunkX = x + dx;
+            const adjChunkZ = z + dz;
+            const adjKey = `${adjChunkX},${adjChunkZ}`;
+            if (chunks[adjKey]) {
+                const adjClone = new Int8Array(chunks[adjKey]).buffer;
+                adjacentChunks[adjKey] = adjClone;
+            }
+        });
+
+        const transferList = [clonedChunkData];
+        Object.values(adjacentChunks).forEach(buffer => transferList.push(buffer));
+
+        geometryWorker.postMessage({
+            type: 'process_chunk',
+            chunkX: x,
+            chunkZ: z,
+            chunkData: clonedChunkData,
+            adjacentChunks
+        }, transferList);
+
+        profiler.trackChunkMeshed();
+    });
+    remeshQueue.clear();
+
+    if (chunkLoadQueue.length > 0 || remeshQueue.size > 0) {
         requestAnimationFrame(processChunkQueue);
     }
+
     profiler.endTimer('chunkProcessing');
 }
 
@@ -546,34 +602,8 @@ function updateBlock(x, y, z, newBlockType) {
 }
 
 function sendChunkToGeometryWorker(chunkX, chunkZ) {
-    profiler.startTimer('meshGeneration');
     const chunkKey = `${chunkX},${chunkZ}`;
-    if (!chunks[chunkKey]) return;
-
-    const chunkData = chunks[chunkKey];
-    const clonedChunkData = new Int8Array(chunkData).buffer;
-
-    const adjacentChunks = {};
-    [[1, 0], [-1, 0], [0, 1], [0, -1]].forEach(([dx, dz]) => {
-        const adjChunkX = chunkX + dx;
-        const adjChunkZ = chunkZ + dz;
-        const adjKey = `${adjChunkX},${adjChunkZ}`;
-        if (chunks[adjKey]) {
-            const adjClone = new Int8Array(chunks[adjKey]).buffer;
-            adjacentChunks[adjKey] = adjClone;
-        }
-    });
-
-    const transferList = [clonedChunkData];
-    Object.values(adjacentChunks).forEach(buffer => transferList.push(buffer));
-
-    geometryWorker.postMessage({
-        type: 'process_chunk',
-        chunkX,
-        chunkZ,
-        chunkData: clonedChunkData,
-        adjacentChunks
-    }, transferList);
+    remeshQueue.add(chunkKey);
 }
 
 function updateChunks(playerPosition) {

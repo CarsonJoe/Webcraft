@@ -394,6 +394,8 @@ function generateGeometry(chunkX, chunkZ, chunkData, adjacentChunks) {
         }
     }
 
+    console.log("[Geometry Worker] Geometry Generated");
+
     return {
         chunkX,
         chunkZ,

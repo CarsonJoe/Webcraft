@@ -182,7 +182,7 @@ function generateChunk(chunkX, chunkZ) {
         }
     });
 
-    console.log('[Chunk Worker] Chunk Generated');
+    // console.log('[Chunk Worker] Chunk Generated');
 
 
     return chunk;
