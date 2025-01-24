@@ -56,14 +56,14 @@ def main():
     
     # Specify the files you want to aggregate
     files_to_aggregate = [
-        "./scripts/collision-system.js",
+        # "./scripts/collision-system.js",
         "./scripts/constants.js",
         "./scripts/main.js",
-        "./scripts/player.js",
-        "./scripts/renderer.js",
-        "./scripts/utils.js",
+        # "./scripts/player.js",
+        # "./scripts/renderer.js",
+        # "./scripts/utils.js",
         "./scripts/world.js",
-        "./index.html",
+        # "./index.html",
         "./scripts/chunksWorker.js",
         "./scripts/geometryWorker.js",
         # Add more file paths as needed

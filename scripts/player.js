@@ -1,6 +1,5 @@
 import { CHUNK_HEIGHT, CHUNK_SIZE } from './constants.js';
 import { getBlock, updateBlock, chunks, addToLoadQueue, spawnPoint } from "./world.js";
-import { updateBlockSelector } from "./utils.js";
 import { chunkMeshes } from "./renderer.js";
 
 // Player module
@@ -157,11 +156,6 @@ const Player = (function () {
         if (event.code === 'KeyF') { // Toggle flying on 'F' press
             isFlying = !isFlying;
             velocity.set(0, 0, 0); // Reset velocity to stop any movement
-        }
-        const key = parseInt(event.key);
-        if (!isNaN(key) && key >= 0 && key <= 9) {
-            selectedBlockType = key;
-            updateBlockSelector();
         }
     }
 
