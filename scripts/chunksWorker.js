@@ -242,10 +242,12 @@ function generateChunkFeatures(chunkX, chunkZ) {
     return features;
 }
 
+const TREE_SCALE = 1; // Adjust this value to scale tree size
+
 function generateLargeTree(chunk, chunkX, chunkZ, worldX, worldZ, baseHeight) {
-    const treeHeight = Math.floor(Math.random() * 10) + 15;
+    const treeHeight = Math.floor((Math.random() * 30 + 15)) * TREE_SCALE;
     const trunkHeight = Math.floor(treeHeight * 0.7);
-    const leafRadius = Math.floor(treeHeight * 0.4) + 2;
+    const leafRadius = Math.floor(treeHeight * 0.4) + 2 * TREE_SCALE;
 
     // Precompute chunk boundaries
     const chunkStartX = chunkX * CHUNK_SIZE;
@@ -260,16 +262,22 @@ function generateLargeTree(chunk, chunkX, chunkZ, worldX, worldZ, baseHeight) {
         if (getBlockInChunk(chunk, localX, baseHeight, localZ) === 6) return;
     }
 
-    // Optimized leaves generation
-    const leavesStartY = baseHeight + trunkHeight - 5;
+    // Spherical leaves generation
     const leavesEndY = baseHeight + treeHeight;
+    const leavesStartY = leavesEndY - trunkHeight * 0.5;
+    const leafCenterY = (leavesStartY + leavesEndY) / 2;
+    const verticalLeafRadius = (leavesEndY - leavesStartY) / 2;
+    
     for (let y = leavesStartY; y <= leavesEndY; y++) {
-        const radius = leafRadius - Math.floor((y - leavesStartY) / 3);
-        if (radius <= 0) continue;
-
-        const radiusSq = radius * radius;
-        const dxMin = Math.max(-radius, chunkStartX - worldX);
-        const dxMax = Math.min(radius, chunkEndX - worldX);
+        const verticalOffset = (y - leafCenterY) / verticalLeafRadius;
+        if (Math.abs(verticalOffset) > 1) continue;
+        
+        const horizontalRadius = Math.floor(leafRadius * Math.sqrt(1 - verticalOffset * verticalOffset));
+        if (horizontalRadius <= 0) continue;
+        
+        const radiusSq = horizontalRadius * horizontalRadius;
+        const dxMin = Math.max(-horizontalRadius, chunkStartX - worldX);
+        const dxMax = Math.min(horizontalRadius, chunkEndX - worldX);
         
         for (let dx = dxMin; dx <= dxMax; dx++) {
             const xSq = dx * dx;
@@ -285,19 +293,19 @@ function generateLargeTree(chunk, chunkX, chunkZ, worldX, worldZ, baseHeight) {
                     chunk, chunkX, chunkZ,
                     worldX + dx, worldZ + dz, y,
                     7, // Leaves
-                    0.2
+                    0.2 + Math.random() * 0.3 // Add some density variation
                 );
             }
         }
     }
 
-    // Optimized trunk generation
+    // Improved trunk generation with scaling
     const bendDirection = Math.random() * Math.PI * 2;
     const cosBend = Math.cos(bendDirection);
     const sinBend = Math.sin(bendDirection);
-    const baseRadius = 1.3;
-    const topRadius = 1;
-    const bendAmount = 2.5;
+    const baseRadius = 1.3 * TREE_SCALE;
+    const topRadius = 1 * TREE_SCALE;
+    const bendAmount = 2.5 * TREE_SCALE;
 
     for (let yRel = 0; yRel < trunkHeight; yRel++) {
         const worldY = baseHeight + yRel;

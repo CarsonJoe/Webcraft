@@ -9,7 +9,46 @@
 </head>
 <body>
     <div id="cursor"></div>
-    <div id="debug-ui">
+
+    <div class="metric-panel-left">
+        <div class="metric-grid">
+            <div class="metric-item">
+                <div class="metric-value">85%</div>
+                <div class="metric-label">Integrity</div>
+            </div>
+            <div class="metric-item">
+            </div>
+            <div class="metric-item">
+                <div class="metric-value">3.2kV</div>
+                <div class="metric-label">Power</div>
+            </div>
+            <div class="metric-item">
+                <div class="metric-value">64C</div>
+                <div class="metric-label">Temp</div>
+            </div>
+        </div>
+    </div>
+
+    <div class="metric-panel-right">
+        <div class="metric-grid">
+            <div class="metric-item">
+            </div>
+            <div class="metric-item">
+                <div class="metric-value">376g</div>
+                <div class="metric-label">Copper</div>
+            </div>
+            <div class="metric-item">
+                <div class="metric-value">3.7kg</div>
+                <div class="metric-label">Weight</div>
+            </div>
+            <div class="metric-item">
+                <div class="metric-value">35%</div>
+                <div class="metric-label">Capacity</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- <div id="debug-ui">
         <div class="debug-section">
             <h3>Performance</h3>
             <div id="frame-stats"></div>
@@ -22,7 +61,7 @@
             <h3>Memory</h3>
             <div id="memory-stats"></div>
         </div>
-    </div>
+    </div> -->
     <!-- <div id="block-selector"></div> -->
     <script type="module" src="scripts/utils.js"></script>
     <script type="module" src="scripts/world.js"></script>
