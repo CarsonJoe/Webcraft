@@ -1,6 +1,7 @@
 import { getBlock } from './world.js';
 
 export function checkCollision(entity, deltaTime) {
+    profiler.startTimer('collisionDetection');
     const { position, velocity, hitbox } = entity;
     const { width, height, depth } = hitbox;
 
@@ -53,6 +54,7 @@ export function checkCollision(entity, deltaTime) {
             }
         }
     }
+    profiler.endTimer('collisionDetection');
 
     return collisionInfo;
 }

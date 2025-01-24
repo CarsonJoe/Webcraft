@@ -106,6 +106,7 @@ self.onmessage = function (e) {
             break;
 
         case 'process_chunk':
+            const start = performance.now();
             const { chunkX, chunkZ, chunkData, adjacentChunks } = e.data;
             const result = generateGeometry(
                 chunkX,
@@ -113,9 +114,11 @@ self.onmessage = function (e) {
                 new Int8Array(chunkData),
                 adjacentChunks
             );
+            const duration = performance.now() - start;
 
             self.postMessage({
                 type: 'geometry_data',
+                duration,
                 ...result
             }, [
                 result.solid.positions.buffer,

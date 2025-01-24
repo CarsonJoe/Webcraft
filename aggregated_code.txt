@@ -6,6 +6,7 @@ File: ./scripts/collision-system.js
 import { getBlock } from './world.js';
 
 export function checkCollision(entity, deltaTime) {
+    profiler.startTimer('collisionDetection');
     const { position, velocity, hitbox } = entity;
     const { width, height, depth } = hitbox;
 
@@ -58,6 +59,7 @@ export function checkCollision(entity, deltaTime) {
             }
         }
     }
+    profiler.endTimer('collisionDetection');
 
     return collisionInfo;
 }
@@ -81,7 +83,7 @@ import Player from './player.js';
 import { CHUNK_HEIGHT } from './constants.js';
 import { updateChunks, setBlock, getBlock, waterMaterial } from './world.js';
 import { initWorld, notifySceneReady, initializationComplete } from './world.js';
-import { createSkybox, initRenderer, render } from './renderer.js';
+import { createSkybox, initRenderer, render, chunkMeshes } from './renderer.js';
 import { updateBlockSelector } from './utils.js';
 
 // Set up the scene, camera, and renderer
@@ -108,6 +110,7 @@ scene.add(directionalLight);
 
 // Cloud setup
 import SimplexNoise from 'https://cdn.jsdelivr.net/npm/simplex-noise@3.0.0/+esm';
+import { profiler } from './profiler.js';
 
 // Generate tileable noise texture using toroidal mapping
 const CLOUD_TEX_SIZE = 512;
@@ -290,6 +293,7 @@ let gameStarted = false;
 
 function animate() {
     requestAnimationFrame(animate);
+    profiler.startFrame();
 
     if (!gameStarted) {
         if (initializationComplete) {
@@ -325,9 +329,39 @@ function animate() {
 
     // Force render even if no changes
     render(scene, camera);
+    
+    profiler.endFrame();
+    updateDebugUI();
 }
 
 animate();
+
+function updateDebugUI() {
+    const metrics = profiler.getMetrics();
+    const frameStats = [
+        `Frame: ${metrics.frame.current}ms`,
+        `Avg: ${metrics.frame.avg}ms`,
+        `Min: ${metrics.frame.min}ms`,
+        `Max: ${metrics.frame.max}ms`
+    ];
+
+    const chunkStats = [
+        `Generated: ${metrics.chunks.generated}`,
+        `Meshed: ${metrics.chunks.meshed}`,
+        `Loaded: ${Object.keys(chunkMeshes).length}`
+    ];
+
+    const memoryStats = [
+        `Geometry: ${metrics.memory.geometry}MB`,
+        `Textures: ${metrics.memory.textures}MB`,
+        `Total: ${metrics.memory.total}MB`
+    ];
+
+    document.getElementById('frame-stats').innerHTML = frameStats.join('<br>');
+    document.getElementById('chunk-stats').innerHTML = chunkStats.join('<br>');
+    document.getElementById('memory-stats').innerHTML = memoryStats.join('<br>');
+}
+
 
 // Handle window resizing
 window.addEventListener('resize', () => {
@@ -361,24 +395,10 @@ const Player = (function () {
     const JUMP_FORCE = 8; // Units per second
     const GRAVITY = 20; // Units per second squared
     const WATER_GRAVITY = 4; // Units per second squared
-    const PLAYER_WIDTH = 1.2;
-    const PLAYER_HEIGHT = 3.6;
+    const PLAYER_WIDTH = 0.9;
+    const PLAYER_HEIGHT = 1.9;
     const HALF_WIDTH = PLAYER_WIDTH / 2;
-    const HALF_DEPTH = HALF_WIDTH; // Assuming square base
-    const COLLISION_OFFSETS = [
-        // Lower layer (y = 0)
-        [-HALF_WIDTH, 0, -HALF_DEPTH],
-        [HALF_WIDTH, 0, -HALF_DEPTH],
-        [-HALF_WIDTH, 0, HALF_DEPTH],
-        [HALF_WIDTH, 0, HALF_DEPTH],
-
-        // Upper layer (y = PLAYER_HEIGHT)
-        [-HALF_WIDTH, PLAYER_HEIGHT, -HALF_DEPTH],
-        [HALF_WIDTH, PLAYER_HEIGHT, -HALF_DEPTH],
-        [-HALF_WIDTH, PLAYER_HEIGHT, HALF_DEPTH],
-        [HALF_WIDTH, PLAYER_HEIGHT, HALF_DEPTH]
-    ];
-    const EYE_HEIGHT = 3.2;
+    const EYE_HEIGHT = 1.8;
     const STEP_HEIGHT = 1.0; // Maximum height of a step the player can automatically climb
 
 
@@ -944,6 +964,7 @@ File: ./scripts/world.js
 
 import { CHUNK_SIZE, CHUNK_HEIGHT, WATER_LEVEL, RENDER_DISTANCE } from './constants.js';
 import { chunkMeshes, removeChunkGeometry, scene } from './renderer.js';
+import { profiler } from './profiler.js';
 
 // Chunk states and initialization flags
 const CHUNK_LOADING = 1;
@@ -1164,9 +1185,9 @@ export const waterMaterial = new THREE.ShaderMaterial({
         gl_FragColor = vec4(finalColor, alpha);
     }
 `,
-transparent: true,
-side: THREE.DoubleSide,
-depthWrite: false
+    transparent: true,
+    side: THREE.DoubleSide,
+    depthWrite: false
 });
 
 // Initialize world systems
@@ -1191,7 +1212,13 @@ export function initWorld() {
 
     geometryWorker.onmessage = function (e) {
         if (e.data.type === 'geometry_data') {
-            createChunkMeshes(e.data.chunkX, e.data.chunkZ, e.data.solid, e.data.water);
+            try {
+                profiler.endTimer('meshGeneration');
+                profiler.trackChunkMeshed();
+                createChunkMeshes(e.data.chunkX, e.data.chunkZ, e.data.solid, e.data.water);
+            } catch (error) {
+                console.error('Error processing geometry:', error);
+            }
         }
     };
 
@@ -1210,6 +1237,7 @@ export function initWorld() {
         } else if (e.data.type === 'chunk_data') {
             const { chunkX, chunkZ, chunkData } = e.data;
             const chunkKey = `${chunkX},${chunkZ}`;
+            profiler.trackChunkGenerated();
 
             // 1. Clone the received buffer for main thread storage
             const clonedBuffer = new ArrayBuffer(chunkData.byteLength);
@@ -1374,6 +1402,7 @@ function addToLoadQueue(x, z, priority = Infinity) {
 
 function processChunkQueue() {
     if (!workerInitialized || !sceneReady) return;
+    profiler.startTimer('chunkProcessing');
 
     // Calculate time since last frame and adjust budget
     const now = performance.now();
@@ -1402,6 +1431,7 @@ function processChunkQueue() {
             chunkStates[chunkKey] = CHUNK_LOADING;
             chunkWorker.postMessage({ chunkX: x, chunkZ: z });
             processed++;
+            profiler.trackChunkGenerated();
         }
 
         // Check if we've exceeded our frame budget
@@ -1412,6 +1442,7 @@ function processChunkQueue() {
     if (chunkLoadQueue.length > 0) {
         requestAnimationFrame(processChunkQueue);
     }
+    profiler.endTimer('chunkProcessing');
 }
 
 function getBlock(x, y, z) {
@@ -1479,6 +1510,7 @@ function updateBlock(x, y, z, newBlockType) {
 }
 
 function sendChunkToGeometryWorker(chunkX, chunkZ) {
+    profiler.startTimer('meshGeneration');
     const chunkKey = `${chunkX},${chunkZ}`;
     if (!chunks[chunkKey]) return;
 
@@ -1627,6 +1659,20 @@ File: ./index.html
 </head>
 <body>
     <div id="cursor"></div>
+    <div id="debug-ui">
+        <div class="debug-section">
+            <h3>Performance</h3>
+            <div id="frame-stats"></div>
+        </div>
+        <div class="debug-section">
+            <h3>Chunks</h3>
+            <div id="chunk-stats"></div>
+        </div>
+        <div class="debug-section">
+            <h3>Memory</h3>
+            <div id="memory-stats"></div>
+        </div>
+    </div>
     <!-- <div id="block-selector"></div> -->
     <script type="module" src="scripts/utils.js"></script>
     <script type="module" src="scripts/world.js"></script>
@@ -2209,6 +2255,7 @@ self.onmessage = function (e) {
             break;
 
         case 'process_chunk':
+            const start = performance.now();
             const { chunkX, chunkZ, chunkData, adjacentChunks } = e.data;
             const result = generateGeometry(
                 chunkX,
@@ -2216,9 +2263,11 @@ self.onmessage = function (e) {
                 new Int8Array(chunkData),
                 adjacentChunks
             );
+            const duration = performance.now() - start;
 
             self.postMessage({
                 type: 'geometry_data',
+                duration,
                 ...result
             }, [
                 result.solid.positions.buffer,

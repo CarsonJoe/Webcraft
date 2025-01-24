@@ -2,7 +2,7 @@ import Player from './player.js';
 import { CHUNK_HEIGHT } from './constants.js';
 import { updateChunks, setBlock, getBlock, waterMaterial } from './world.js';
 import { initWorld, notifySceneReady, initializationComplete } from './world.js';
-import { createSkybox, initRenderer, render } from './renderer.js';
+import { createSkybox, initRenderer, render, chunkMeshes } from './renderer.js';
 import { updateBlockSelector } from './utils.js';
 
 // Set up the scene, camera, and renderer
@@ -29,6 +29,7 @@ scene.add(directionalLight);
 
 // Cloud setup
 import SimplexNoise from 'https://cdn.jsdelivr.net/npm/simplex-noise@3.0.0/+esm';
+import { profiler } from './profiler.js';
 
 // Generate tileable noise texture using toroidal mapping
 const CLOUD_TEX_SIZE = 512;
@@ -211,6 +212,7 @@ let gameStarted = false;
 
 function animate() {
     requestAnimationFrame(animate);
+    profiler.startFrame();
 
     if (!gameStarted) {
         if (initializationComplete) {
@@ -246,9 +248,38 @@ function animate() {
 
     // Force render even if no changes
     render(scene, camera);
+    
+    profiler.endFrame();
+    updateDebugUI();
 }
 
 animate();
+
+function updateDebugUI() {
+    const metrics = profiler.getMetrics();
+    const frameStats = [
+        `Frame: ${metrics.frame.current}ms`,
+        `Avg: ${metrics.frame.avg}ms`,
+        `Min: ${metrics.frame.min}ms`,
+        `Max: ${metrics.frame.max}ms`
+    ];
+
+    const chunkStats = [
+        `Generated: ${metrics.chunks.generated}`,
+        `Meshed: ${metrics.chunks.meshed}`,
+        `Loaded: ${Object.keys(chunkMeshes).length}`
+    ];
+
+    const memoryStats = [
+        `Geometry: ${metrics.memory.geometry}MB`,
+        `Total: ${metrics.memory.total}MB`
+    ];
+
+    document.getElementById('frame-stats').innerHTML = frameStats.join('<br>');
+    document.getElementById('chunk-stats').innerHTML = chunkStats.join('<br>');
+    document.getElementById('memory-stats').innerHTML = memoryStats.join('<br>');
+}
+
 
 // Handle window resizing
 window.addEventListener('resize', () => {

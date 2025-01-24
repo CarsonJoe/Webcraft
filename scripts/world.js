@@ -1,5 +1,6 @@
 import { CHUNK_SIZE, CHUNK_HEIGHT, WATER_LEVEL, RENDER_DISTANCE } from './constants.js';
 import { chunkMeshes, removeChunkGeometry, scene } from './renderer.js';
+import { profiler } from './profiler.js';
 
 // Chunk states and initialization flags
 const CHUNK_LOADING = 1;
@@ -220,9 +221,9 @@ export const waterMaterial = new THREE.ShaderMaterial({
         gl_FragColor = vec4(finalColor, alpha);
     }
 `,
-transparent: true,
-side: THREE.DoubleSide,
-depthWrite: false
+    transparent: true,
+    side: THREE.DoubleSide,
+    depthWrite: false
 });
 
 // Initialize world systems
@@ -247,7 +248,13 @@ export function initWorld() {
 
     geometryWorker.onmessage = function (e) {
         if (e.data.type === 'geometry_data') {
-            createChunkMeshes(e.data.chunkX, e.data.chunkZ, e.data.solid, e.data.water);
+            try {
+                profiler.endTimer('meshGeneration');
+                profiler.trackChunkMeshed();
+                createChunkMeshes(e.data.chunkX, e.data.chunkZ, e.data.solid, e.data.water);
+            } catch (error) {
+                console.error('Error processing geometry:', error);
+            }
         }
     };
 
@@ -266,6 +273,7 @@ export function initWorld() {
         } else if (e.data.type === 'chunk_data') {
             const { chunkX, chunkZ, chunkData } = e.data;
             const chunkKey = `${chunkX},${chunkZ}`;
+            profiler.trackChunkGenerated();
 
             // 1. Clone the received buffer for main thread storage
             const clonedBuffer = new ArrayBuffer(chunkData.byteLength);
@@ -430,6 +438,7 @@ function addToLoadQueue(x, z, priority = Infinity) {
 
 function processChunkQueue() {
     if (!workerInitialized || !sceneReady) return;
+    profiler.startTimer('chunkProcessing');
 
     // Calculate time since last frame and adjust budget
     const now = performance.now();
@@ -458,6 +467,7 @@ function processChunkQueue() {
             chunkStates[chunkKey] = CHUNK_LOADING;
             chunkWorker.postMessage({ chunkX: x, chunkZ: z });
             processed++;
+            profiler.trackChunkGenerated();
         }
 
         // Check if we've exceeded our frame budget
@@ -468,6 +478,7 @@ function processChunkQueue() {
     if (chunkLoadQueue.length > 0) {
         requestAnimationFrame(processChunkQueue);
     }
+    profiler.endTimer('chunkProcessing');
 }
 
 function getBlock(x, y, z) {
@@ -535,6 +546,7 @@ function updateBlock(x, y, z, newBlockType) {
 }
 
 function sendChunkToGeometryWorker(chunkX, chunkZ) {
+    profiler.startTimer('meshGeneration');
     const chunkKey = `${chunkX},${chunkZ}`;
     if (!chunks[chunkKey]) return;
 

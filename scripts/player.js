@@ -12,24 +12,10 @@ const Player = (function () {
     const JUMP_FORCE = 8; // Units per second
     const GRAVITY = 20; // Units per second squared
     const WATER_GRAVITY = 4; // Units per second squared
-    const PLAYER_WIDTH = 1.2;
-    const PLAYER_HEIGHT = 3.6;
+    const PLAYER_WIDTH = 0.9;
+    const PLAYER_HEIGHT = 1.9;
     const HALF_WIDTH = PLAYER_WIDTH / 2;
-    const HALF_DEPTH = HALF_WIDTH; // Assuming square base
-    const COLLISION_OFFSETS = [
-        // Lower layer (y = 0)
-        [-HALF_WIDTH, 0, -HALF_DEPTH],
-        [HALF_WIDTH, 0, -HALF_DEPTH],
-        [-HALF_WIDTH, 0, HALF_DEPTH],
-        [HALF_WIDTH, 0, HALF_DEPTH],
-
-        // Upper layer (y = PLAYER_HEIGHT)
-        [-HALF_WIDTH, PLAYER_HEIGHT, -HALF_DEPTH],
-        [HALF_WIDTH, PLAYER_HEIGHT, -HALF_DEPTH],
-        [-HALF_WIDTH, PLAYER_HEIGHT, HALF_DEPTH],
-        [HALF_WIDTH, PLAYER_HEIGHT, HALF_DEPTH]
-    ];
-    const EYE_HEIGHT = 3.2;
+    const EYE_HEIGHT = 1.8;
     const STEP_HEIGHT = 1.0; // Maximum height of a step the player can automatically climb
 
 
