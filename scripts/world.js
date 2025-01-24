@@ -251,11 +251,18 @@ export function initWorld() {
         if (e.data.type === 'geometry_data') {
             try {
                 profiler.endTimer('meshGeneration');
-                // Only track meshing when geometry is actually created
-                if (e.data.solid.positions.length > 0 || e.data.water.positions.length > 0) {
+                
+                // Track based on generation type
+                if (e.data.isInitialGeneration) {
+                    profiler.trackChunkGenerated();
+                } else {
                     profiler.trackChunkMeshed();
                 }
-                createChunkMeshes(e.data.chunkX, e.data.chunkZ, e.data.solid, e.data.water);
+                
+                // Only create meshes if geometry exists
+                if (e.data.solid.positions.length > 0 || e.data.water.positions.length > 0) {
+                    createChunkMeshes(e.data.chunkX, e.data.chunkZ, e.data.solid, e.data.water);
+                }
             } catch (error) {
                 console.error('Error processing geometry:', error);
             }
@@ -277,7 +284,6 @@ export function initWorld() {
         } else if (e.data.type === 'chunk_data') {
             const { chunkX, chunkZ, chunkData } = e.data;
             const chunkKey = `${chunkX},${chunkZ}`;
-            profiler.trackChunkGenerated();
 
             // 1. Clone the received buffer for main thread storage
             const clonedBuffer = new ArrayBuffer(chunkData.byteLength);
@@ -308,7 +314,8 @@ export function initWorld() {
                 chunkX,
                 chunkZ,
                 chunkData: chunkData,
-                adjacentChunks
+                adjacentChunks,
+                isInitialGeneration: true
             }, transferList);
 
             updateAdjacentChunks(chunkX, chunkZ);
@@ -523,10 +530,9 @@ function processChunkQueue() {
             chunkX: x,
             chunkZ: z,
             chunkData: clonedChunkData,
-            adjacentChunks
+            adjacentChunks,
+            isInitialGeneration: false
         }, transferList);
-
-        profiler.trackChunkMeshed();
     });
     remeshQueue.clear();
 
