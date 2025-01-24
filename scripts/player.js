@@ -12,24 +12,10 @@ const Player = (function () {
     const JUMP_FORCE = 8; // Units per second
     const GRAVITY = 20; // Units per second squared
     const WATER_GRAVITY = 4; // Units per second squared
-    const PLAYER_WIDTH = 1.2;
-    const PLAYER_HEIGHT = 3.6;
+    const PLAYER_WIDTH = 0.9;
+    const PLAYER_HEIGHT = 1.9;
     const HALF_WIDTH = PLAYER_WIDTH / 2;
-    const HALF_DEPTH = HALF_WIDTH; // Assuming square base
-    const COLLISION_OFFSETS = [
-        // Lower layer (y = 0)
-        [-HALF_WIDTH, 0, -HALF_DEPTH],
-        [HALF_WIDTH, 0, -HALF_DEPTH],
-        [-HALF_WIDTH, 0, HALF_DEPTH],
-        [HALF_WIDTH, 0, HALF_DEPTH],
-        
-        // Upper layer (y = PLAYER_HEIGHT)
-        [-HALF_WIDTH, PLAYER_HEIGHT, -HALF_DEPTH],
-        [HALF_WIDTH, PLAYER_HEIGHT, -HALF_DEPTH],
-        [-HALF_WIDTH, PLAYER_HEIGHT, HALF_DEPTH],
-        [HALF_WIDTH, PLAYER_HEIGHT, HALF_DEPTH]
-    ];
-    const EYE_HEIGHT = 3.2;
+    const EYE_HEIGHT = 1.8;
     const STEP_HEIGHT = 1.0; // Maximum height of a step the player can automatically climb
 
 
@@ -188,58 +174,58 @@ const Player = (function () {
 
     function update() {
         if (!yawObject) return;
-    
+
         const currentTime = performance.now();
         const deltaTime = (currentTime - lastTime) / 1000; // Convert to seconds
         lastTime = currentTime;
-    
+
         const direction = new THREE.Vector3();
         const rotation = yawObject.rotation.y;
-    
+
         if (keys['KeyW']) direction.z = -1;
         if (keys['KeyS']) direction.z = 1;
         if (keys['KeyA']) direction.x = -1;
         if (keys['KeyD']) direction.x = 1;
-    
+
         direction.applyAxisAngle(new THREE.Vector3(0, 1, 0), rotation);
-    
+
         if (isFlying) {
             // Flying movement logic
             let flySpeed = isSprinting ? SPRINT_SPEED : NORMAL_SPEED;
             flySpeed *= 2;
-    
+
             // Get camera's forward and right vectors
             const forward = new THREE.Vector3();
             camera.getWorldDirection(forward);
             forward.normalize();
-    
+
             const right = new THREE.Vector3();
             right.crossVectors(new THREE.Vector3(0, 1, 0), forward).normalize();
-    
+
             const moveDirection = new THREE.Vector3();
-    
+
             // Movement based on camera direction
             if (keys['KeyW']) moveDirection.add(forward);
             if (keys['KeyS']) moveDirection.sub(forward);
             if (keys['KeyA']) moveDirection.add(right);
             if (keys['KeyD']) moveDirection.sub(right);
-    
+
             // Vertical movement
             if (keys['Space']) moveDirection.y += 1;
             if (keys['ShiftLeft']) moveDirection.y -= 1;
-    
+
             if (moveDirection.length() > 0) {
                 moveDirection.normalize();
             }
-    
+
             const movement = moveDirection.multiplyScalar(flySpeed * deltaTime);
             yawObject.position.add(movement);
-    
+
             canJump = false; // Disable jumping while flying
         } else {
             // Original movement and physics (non-flying)
             isSwimming = checkWaterCollision(yawObject.position.x, yawObject.position.y + EYE_HEIGHT / 2, yawObject.position.z);
-    
+        
             if (keys['Space']) {
                 if (isSwimming) {
                     velocity.y = SWIM_SPEED; // Swim upwards
@@ -248,7 +234,7 @@ const Player = (function () {
                     canJump = false;
                 }
             }
-    
+        
             // Apply gravity and vertical collision detection
             velocity.y -= (isSwimming ? WATER_GRAVITY : GRAVITY) * deltaTime;
             if (checkCollision(yawObject.position.x, yawObject.position.y + velocity.y * deltaTime, yawObject.position.z)) {
@@ -258,15 +244,22 @@ const Player = (function () {
                 velocity.y = 0;
             }
             yawObject.position.y += velocity.y * deltaTime;
-    
-            const currentSpeed = isSwimming ? SWIM_SPEED : (isSprinting ? SPRINT_SPEED : NORMAL_SPEED);
-    
+        
+            // Check if the player is in leaves
+            const isInLeaves = checkInLeaves();
+        
+            // Adjust movement speed based on whether the player is in leaves
+            let currentSpeed = isSwimming ? SWIM_SPEED : (isSprinting ? SPRINT_SPEED : NORMAL_SPEED);
+            if (isInLeaves) {
+                currentSpeed *= 0.5; // Reduce speed by 50% when in leaves
+            }
+        
             // Horizontal movement and collision detection with auto-jump
             const movement = direction.multiplyScalar(currentSpeed * deltaTime);
             const newX = yawObject.position.x + movement.x;
             const newZ = yawObject.position.z + movement.z;
-    
-            // Check for collision at the new position
+        
+            // Check for collision at the new position (ignoring leaves)
             if (checkCollision(newX, yawObject.position.y, newZ)) {
                 // Check if we can step up
                 if (!checkCollision(newX, yawObject.position.y + STEP_HEIGHT, newZ)) {
@@ -289,7 +282,7 @@ const Player = (function () {
                 yawObject.position.z = newZ;
             }
         }
-    
+
         // Static collision check to prevent being stuck in blocks (only when not flying)
         if (!isFlying) {
             let resolved = false;
@@ -298,13 +291,13 @@ const Player = (function () {
                 resolved = true;
                 if (yawObject.position.y >= CHUNK_HEIGHT) break; // Prevent infinite loop
             }
-    
+
             if (resolved) {
                 velocity.y = 0;
                 canJump = true;
             }
         }
-    
+
         // Ensure player doesn't fall through the world
         if (yawObject.position.y < -10) {
             yawObject.position.set(0, 200, 0);
@@ -319,19 +312,19 @@ const Player = (function () {
         const maxY = y + PLAYER_HEIGHT;
         const minZ = z - HALF_WIDTH;
         const maxZ = z + HALF_WIDTH;
-    
+
         const startX = Math.floor(minX);
         const endX = Math.floor(maxX);
         const startY = Math.floor(minY);
         const endY = Math.floor(maxY);
         const startZ = Math.floor(minZ);
         const endZ = Math.floor(maxZ);
-    
+
         for (let bx = startX; bx <= endX; bx++) {
             for (let bz = startZ; bz <= endZ; bz++) {
                 for (let by = startY; by <= endY; by++) {
                     const blockType = getBlockGlobal(bx, by, bz);
-                    if (blockType !== 0 && blockType !== 5) {
+                    if (blockType !== 0 && blockType !== 5 && blockType !== 7) {
                         return true; // Collision detected
                     }
                 }
@@ -343,6 +336,28 @@ const Player = (function () {
     function checkWaterCollision(x, y, z) {
         const blockType = getBlock(Math.floor(x), Math.floor(y), Math.floor(z));
         return blockType === 5; // 5 is the water block type
+    }
+
+    function checkInLeaves() {
+        const pos = yawObject.position;
+        const minX = pos.x - HALF_WIDTH;
+        const maxX = pos.x + HALF_WIDTH;
+        const minY = pos.y;
+        const maxY = pos.y + PLAYER_HEIGHT;
+        const minZ = pos.z - HALF_WIDTH;
+        const maxZ = pos.z + HALF_WIDTH;
+
+        for (let x = Math.floor(minX); x <= Math.floor(maxX); x++) {
+            for (let y = Math.floor(minY); y <= Math.floor(maxY); y++) {
+                for (let z = Math.floor(minZ); z <= Math.floor(maxZ); z++) {
+                    const blockType = getBlockGlobal(x, y, z);
+                    if (blockType === 7) { // Leaves are block type 7
+                        return true;
+                    }
+                }
+            }
+        }
+        return false;
     }
 
     function getPosition() {
@@ -358,23 +373,23 @@ const Player = (function () {
         const blockX = Math.floor(x);
         const blockY = Math.floor(y);
         const blockZ = Math.floor(z);
-    
+
         const chunkX = Math.floor(blockX / CHUNK_SIZE);
         const chunkZ = Math.floor(blockZ / CHUNK_SIZE);
         const chunkKey = `${chunkX},${chunkZ}`;
-    
+
         if (!chunks[chunkKey]) {
             addToLoadQueue(chunkX, chunkZ, Infinity);
             return 0;
         }
-    
+
         const localX = ((blockX % CHUNK_SIZE) + CHUNK_SIZE) % CHUNK_SIZE;
         const localZ = ((blockZ % CHUNK_SIZE) + CHUNK_SIZE) % CHUNK_SIZE;
         const localY = blockY;
-    
+
         if (localY < 0) return 1; // Bedrock at bottom
         if (localY >= CHUNK_HEIGHT) return 0; // Air above max height
-    
+
         return chunks[chunkKey][localX + localZ * CHUNK_SIZE + localY * CHUNK_SIZE * CHUNK_SIZE] || 0;
     }
 

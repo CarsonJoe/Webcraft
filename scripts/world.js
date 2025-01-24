@@ -1,5 +1,6 @@
 import { CHUNK_SIZE, CHUNK_HEIGHT, WATER_LEVEL, RENDER_DISTANCE } from './constants.js';
 import { chunkMeshes, removeChunkGeometry, scene } from './renderer.js';
+import { profiler } from './profiler.js';
 
 // Chunk states and initialization flags
 const CHUNK_LOADING = 1;
@@ -20,6 +21,7 @@ const UPDATE_COOLDOWN = 100; // ms
 const chunks = {};
 const chunkStates = {};
 const queuedChunks = new Set(); // Track chunk keys like "x,z"
+let remeshQueue = new Set();
 const chunkLoadQueue = [];      // Use as a priority queue (heap)
 const blockColors = new Map();
 
@@ -46,23 +48,24 @@ const materials = {
 };
 
 const solidMaterial = new THREE.MeshLambertMaterial({ vertexColors: true });
-// When creating the water material
 export const waterMaterial = new THREE.ShaderMaterial({
     uniforms: {
         time: { value: 0 },
-        waterColor: { value: new THREE.Color(0x6380ec) },
+        waterColor: { value: new THREE.Color(0x6fbffc) },
         lightDirection: { value: new THREE.Vector3(1, 1, 1).normalize() },
-        waveSpeed: { value: 0.7 },
-        waveScale: { value: 1.5 },
+        waveScale: { value: .2 },
+        fogColor: { value: new THREE.Color(0x619dde) },
+        fogNear: { value: 20 },
+        fogFar: { value: 300 },
+        cameraPos: { value: new THREE.Vector3() }, // Added camera position
+        reflectionIntensity: { value: 0.2 } // New uniform for reflection control
     },
     vertexShader: `
-        varying vec3 vPosition;
         varying vec3 vNormal;
-        varying vec2 vUv;
-        uniform float time;
-        uniform float waveSpeed;
-        uniform float waveScale;
+        varying vec3 vWorldPosition;
         varying float vDisplacement;
+        uniform float time;
+        uniform float waveScale;
 
         // Classic Perlin noise implementation
         vec4 permute(vec4 x) { return mod(((x*34.0)+1.0)*x, 289.0); }
@@ -136,93 +139,89 @@ export const waterMaterial = new THREE.ShaderMaterial({
         }
 
         void main() {
-            vUv = uv;
-            vec4 worldPosition = modelMatrix * vec4(position, 1.0);
-            float worldX = worldPosition.x;
-            float worldZ = worldPosition.z;
+            vec4 baseWorldPosition = modelMatrix * vec4(position, 1.0);
+            float worldX = baseWorldPosition.x;
+            float worldZ = baseWorldPosition.z;
             
-            // Base large swells (low frequency)
-            float swell = noise(vec3(worldX * 0.15, worldZ * 0.15, time * 0.1)) * 0.4;
+            // Large waves (unchanged)
+            float displacement = noise(vec3(worldX * 0.3, worldZ * 0.3, time * 0.1)) * waveScale;
+            displacement += sin(worldX * 0.5 + time) * 0.2 * waveScale;
             
-            // Medium waves with directional component
-            vec2 mediumWaveDir = vec2(0.8, 0.6);
-            float mediumWave = noise(vec3(
-                (worldX * mediumWaveDir.x + worldZ * mediumWaveDir.y) * 0.4 + time * 0.3,
-                (worldZ * mediumWaveDir.x - worldX * mediumWaveDir.y) * 0.4,
-                time * 0.2
-            )) * 0.3;
+            // Smaller wave ripples
+            float rippleFrequency = 10.0; // Higher frequency for tighter ripples in x and z
+            float rippleAmplitude = 0.2; // Larger amplitude for taller ripples in y
+            displacement += noise(vec3(worldX * rippleFrequency, worldZ * rippleFrequency, time * 1.0)) * rippleAmplitude;
+            displacement += sin(worldX * rippleFrequency + time * .1) * 0.1 * rippleAmplitude;
             
-            // High frequency detail
-            float detail = noise(vec3(worldX * 1.5, worldZ * 1.5, time * 0.5)) * 0.2;
+            displacement = clamp(displacement, -0.5, 0.5);
             
-            // Combine layers with varying speeds
-            float displacement = (swell * 0.7 + mediumWave * 0.5 + detail * 0.3) * waveScale;
-            
-            
-            vDisplacement = displacement;
-
-            // Add some sine waves for rhythm
-            displacement += sin(worldX * 0.3 + time * 1.2) * 0.1 * waveScale;
-            displacement += sin(worldZ * 0.4 + time * 1.5) * 0.08 * waveScale;
+            vDisplacement = displacement; // Pass displacement to fragment shader
             
             vec3 pos = position;
             pos.y += displacement;
+            vec4 displacedWorldPosition = modelMatrix * vec4(pos, 1.0);
+            vWorldPosition = displacedWorldPosition.xyz;
 
-            // Calculate normals using noise derivatives
+            // Simplified normal calculation (unchanged)
             float eps = 0.1;
-            float dx = noise(vec3((worldX + eps) * 0.15, worldZ * 0.15, time * 0.1)) * 0.4 -
-                    noise(vec3((worldX - eps) * 0.15, worldZ * 0.15, time * 0.1)) * 0.4;
-                    
-            float dz = noise(vec3(worldX * 0.15, (worldZ + eps) * 0.15, time * 0.1)) * 0.4 -
-                    noise(vec3(worldX * 0.15, (worldZ - eps) * 0.15, time * 0.1)) * 0.4;
-
+            float dx = noise(vec3((worldX + eps) * 0.3, worldZ * 0.3, time * 0.5)) - 
+                    noise(vec3((worldX - eps) * 0.3, worldZ * 0.3, time * 0.5));
+            float dz = noise(vec3(worldX * 0.3, (worldZ + eps) * 0.3, time * 0.5)) - 
+                    noise(vec3(worldX * 0.3, (worldZ - eps) * 0.3, time * 0.5));
+            
             vNormal = normalize(vec3(-dx * 2.0, 1.0, -dz * 2.0));
-            vPosition = pos;
-
             gl_Position = projectionMatrix * modelViewMatrix * vec4(pos, 1.0);
         }
     `,
-    fragmentShader: `// Fragment Shader
-        varying vec3 vPosition;
-        varying vec3 vNormal;
-        varying vec2 vUv;
-        varying float vDisplacement;
-        uniform vec3 waterColor;
-        uniform vec3 lightDirection;
-        uniform float time;
+    fragmentShader: `
+    varying vec3 vNormal;
+    varying vec3 vWorldPosition;
+    varying float vDisplacement;
+    uniform vec3 waterColor;
+    uniform vec3 lightDirection;
+    uniform vec3 fogColor;
+    uniform float fogNear;
+    uniform float fogFar;
+    uniform vec3 cameraPos; // Camera position uniform
+    uniform float reflectionIntensity;
 
-        void main() {
-            vec3 normal = normalize(vNormal);
-            vec3 lightDir = normalize(lightDirection);
-            vec3 viewDir = normalize(cameraPosition - vPosition);
-            float diffuse = max(dot(normal, lightDir), 0.2);
-            vec3 reflectDir = reflect(-lightDir, normal);
-            float specularPower = 32.0 + sin(time * 2.0) * 8.0;
-            float specular = pow(max(dot(viewDir, reflectDir), 0.0), specularPower);
-            float fresnel = pow(1.0 - dot(normal, viewDir), 2.0);
-            float alpha = 0.7 * (1.0 - fresnel * 0.5);
+    void main() {
+        vec3 normal = normalize(vNormal);
+        vec3 lightDir = normalize(lightDirection);
+        vec3 viewDir = normalize(cameraPos - vWorldPosition); // Calculate view direction
 
-            // Gradient calculation (dark to light based on displacement)
-            vec3 darkWater = waterColor * 0.6;
-            vec3 lightWater = waterColor * 1.4;
-            float gradientFactor = smoothstep(-0.3, 0.5, vDisplacement);
-            vec3 gradientColor = mix(darkWater, lightWater, gradientFactor);
+        // Fresnel effect calculation
+        float fresnel = pow(clamp(1.0 - dot(normal, viewDir), 0.0, 1.0), 5.0);
+        fresnel *= reflectionIntensity; // Control reflection strength
 
-            // Base color with lighting
-            vec3 color = gradientColor * (diffuse + specular * 0.3);
+        // Base color gradient from displacement
+        float gradientFactor = smoothstep(-0.9, 0.9, vDisplacement);
+        vec3 darkColor = waterColor * 0.95;
+        vec3 lightColor = waterColor * 1.05;
+        vec3 baseColor = mix(darkColor, lightColor, gradientFactor);
 
-            // Foam effect (white highlights on peaks)
-            float foam = smoothstep(0.2, 0.35, vDisplacement);
-            vec3 foamColor = mix(gradientColor, vec3(1.0), 0.9);
-            color = mix(color, foamColor * 1.3, foam * 0.6);
+        // Specular highlights (Blinn-Phong model)
+        vec3 halfDir = normalize(lightDir + viewDir);
+        float specular = pow(max(dot(normal, halfDir), 0.0), 128.0);
+        vec3 specularColor = vec3(1.0) * specular * fresnel;
 
-            // Specular and fresnel adjustments
-            color += specular * (0.3 + 0.1 * sin(time * 3.0));
-            color = mix(color, vec3(1.0), fresnel * 0.3);
+        // Combine colors with Fresnel effect
+        vec3 reflectionColor = mix(baseColor, vec3(1.0), fresnel);
+        vec3 finalColor = mix(baseColor, reflectionColor, fresnel) * 
+                        max(dot(normal, lightDir), 0.2) + 
+                        specularColor;
 
-            gl_FragColor = vec4(color, alpha);
-        }
-    `,
+        // Apply fog
+        float depth = distance(vWorldPosition, cameraPos);
+        float fogFactor = smoothstep(fogNear, fogFar, depth);
+        finalColor = mix(finalColor, fogColor, fogFactor);
+
+        // Alpha based on displacement
+        float alpha = 0.8 + 0.2 * abs(vDisplacement);
+
+        gl_FragColor = vec4(finalColor, alpha);
+    }
+`,
     transparent: true,
     side: THREE.DoubleSide,
     depthWrite: false
@@ -250,7 +249,23 @@ export function initWorld() {
 
     geometryWorker.onmessage = function (e) {
         if (e.data.type === 'geometry_data') {
-            createChunkMeshes(e.data.chunkX, e.data.chunkZ, e.data.solid, e.data.water);
+            try {
+                profiler.endTimer('meshGeneration');
+                
+                // Track based on generation type
+                if (e.data.isInitialGeneration) {
+                    profiler.trackChunkGenerated();
+                } else {
+                    profiler.trackChunkMeshed();
+                }
+                
+                // Only create meshes if geometry exists
+                if (e.data.solid.positions.length > 0 || e.data.water.positions.length > 0) {
+                    createChunkMeshes(e.data.chunkX, e.data.chunkZ, e.data.solid, e.data.water);
+                }
+            } catch (error) {
+                console.error('Error processing geometry:', error);
+            }
         }
     };
 
@@ -299,7 +314,8 @@ export function initWorld() {
                 chunkX,
                 chunkZ,
                 chunkData: chunkData,
-                adjacentChunks
+                adjacentChunks,
+                isInitialGeneration: true
             }, transferList);
 
             updateAdjacentChunks(chunkX, chunkZ);
@@ -433,25 +449,24 @@ function addToLoadQueue(x, z, priority = Infinity) {
 
 function processChunkQueue() {
     if (!workerInitialized || !sceneReady) return;
+    profiler.startTimer('chunkProcessing');
 
-    // Calculate time since last frame and adjust budget
     const now = performance.now();
     const timeSinceLastFrame = now - lastFrameTime;
     lastFrameTime = now;
 
-    // Adjust frame budget based on actual frame time
     if (timeSinceLastFrame < 16) {
-        frameBudget += 16 - timeSinceLastFrame; // We have extra time
+        frameBudget += 16 - timeSinceLastFrame;
     } else {
-        frameBudget -= timeSinceLastFrame - 16; // We're running behind
+        frameBudget -= timeSinceLastFrame - 16;
     }
 
-    // Keep frame budget within reasonable bounds
     frameBudget = Math.max(8, Math.min(32, frameBudget));
 
     const startTime = performance.now();
     let processed = 0;
 
+    // Process load queue first
     while (chunkLoadQueue.length > 0 && processed < MAX_CHUNKS_PER_FRAME) {
         const { x, z } = chunkLoadQueue.shift();
         queuedChunks.delete(`${x},${z}`);
@@ -461,16 +476,71 @@ function processChunkQueue() {
             chunkStates[chunkKey] = CHUNK_LOADING;
             chunkWorker.postMessage({ chunkX: x, chunkZ: z });
             processed++;
+            profiler.trackChunkGenerated();
         }
 
-        // Check if we've exceeded our frame budget
         if (performance.now() - startTime > frameBudget) break;
     }
 
-    // If there are still chunks to process, schedule next frame
-    if (chunkLoadQueue.length > 0) {
+    // Process remesh queue
+    remeshQueue.forEach(chunkKey => {
+        const [x, z] = chunkKey.split(',').map(Number);
+        if (!chunks[chunkKey]) {
+            remeshQueue.delete(chunkKey);
+            return;
+        }
+    
+        // Add adjacency check to prevent unnecessary remeshing
+        const isEdgeChunk = 
+            x === currentPlayerChunkX - RENDER_DISTANCE ||
+            x === currentPlayerChunkX + RENDER_DISTANCE ||
+            z === currentPlayerChunkZ - RENDER_DISTANCE ||
+            z === currentPlayerChunkZ + RENDER_DISTANCE;
+    
+        if (!isEdgeChunk) {
+            // Check if all neighbors are loaded
+            const neighborsLoaded = [[1,0], [-1,0], [0,1], [0,-1]].every(([dx, dz]) => {
+                const neighborKey = `${x+dx},${z+dz}`;
+                return chunks[neighborKey] && chunkStates[neighborKey] === CHUNK_LOADED;
+            });
+    
+            if (!neighborsLoaded) return;
+        }
+    
+        profiler.startTimer('meshGeneration');
+        const chunkData = chunks[chunkKey];
+        const clonedChunkData = new Int8Array(chunkData).buffer;
+
+        const adjacentChunks = {};
+        [[1, 0], [-1, 0], [0, 1], [0, -1]].forEach(([dx, dz]) => {
+            const adjChunkX = x + dx;
+            const adjChunkZ = z + dz;
+            const adjKey = `${adjChunkX},${adjChunkZ}`;
+            if (chunks[adjKey]) {
+                const adjClone = new Int8Array(chunks[adjKey]).buffer;
+                adjacentChunks[adjKey] = adjClone;
+            }
+        });
+
+        const transferList = [clonedChunkData];
+        Object.values(adjacentChunks).forEach(buffer => transferList.push(buffer));
+
+        geometryWorker.postMessage({
+            type: 'process_chunk',
+            chunkX: x,
+            chunkZ: z,
+            chunkData: clonedChunkData,
+            adjacentChunks,
+            isInitialGeneration: false
+        }, transferList);
+    });
+    remeshQueue.clear();
+
+    if (chunkLoadQueue.length > 0 || remeshQueue.size > 0) {
         requestAnimationFrame(processChunkQueue);
     }
+
+    profiler.endTimer('chunkProcessing');
 }
 
 function getBlock(x, y, z) {
@@ -539,32 +609,7 @@ function updateBlock(x, y, z, newBlockType) {
 
 function sendChunkToGeometryWorker(chunkX, chunkZ) {
     const chunkKey = `${chunkX},${chunkZ}`;
-    if (!chunks[chunkKey]) return;
-
-    const chunkData = chunks[chunkKey];
-    const clonedChunkData = new Int8Array(chunkData).buffer;
-
-    const adjacentChunks = {};
-    [[1, 0], [-1, 0], [0, 1], [0, -1]].forEach(([dx, dz]) => {
-        const adjChunkX = chunkX + dx;
-        const adjChunkZ = chunkZ + dz;
-        const adjKey = `${adjChunkX},${adjChunkZ}`;
-        if (chunks[adjKey]) {
-            const adjClone = new Int8Array(chunks[adjKey]).buffer;
-            adjacentChunks[adjKey] = adjClone;
-        }
-    });
-
-    const transferList = [clonedChunkData];
-    Object.values(adjacentChunks).forEach(buffer => transferList.push(buffer));
-
-    geometryWorker.postMessage({
-        type: 'process_chunk',
-        chunkX,
-        chunkZ,
-        chunkData: clonedChunkData,
-        adjacentChunks
-    }, transferList);
+    remeshQueue.add(chunkKey);
 }
 
 function updateChunks(playerPosition) {

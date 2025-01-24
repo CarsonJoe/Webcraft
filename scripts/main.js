@@ -2,7 +2,7 @@ import Player from './player.js';
 import { CHUNK_HEIGHT } from './constants.js';
 import { updateChunks, setBlock, getBlock, waterMaterial } from './world.js';
 import { initWorld, notifySceneReady, initializationComplete } from './world.js';
-import { createSkybox, initRenderer, render } from './renderer.js';
+import { createSkybox, initRenderer, render, chunkMeshes } from './renderer.js';
 import { updateBlockSelector } from './utils.js';
 
 // Set up the scene, camera, and renderer
@@ -29,6 +29,7 @@ scene.add(directionalLight);
 
 // Cloud setup
 import SimplexNoise from 'https://cdn.jsdelivr.net/npm/simplex-noise@3.0.0/+esm';
+import { profiler } from './profiler.js';
 
 // Generate tileable noise texture using toroidal mapping
 const CLOUD_TEX_SIZE = 512;
@@ -85,8 +86,9 @@ const cloudMaterial = new THREE.ShaderMaterial({
         lightDirection: { value: directionalLight.position.normalize() },
         cloudSpeed: { value: 0.0005 },  // Increased default speed
         cloudCover: { value: 0.9 },  // Added cloud cover parameter
-        densityScale: { value: .5 }, // Adjusted default density
-        lightIntensity: { value: .5 }
+        densityScale: { value: .9 }, // Adjusted default density
+        lightIntensity: { value: .5 },
+        cloudPosition: { value: new THREE.Vector3() }
     },
     vertexShader: `
     varying vec2 vUv;
@@ -107,6 +109,7 @@ const cloudMaterial = new THREE.ShaderMaterial({
     uniform float densityScale;
     varying vec2 vUv;
     varying vec3 vWorldPosition;
+    uniform vec3 cloudPosition;
 
     #define OCTAVES 4
 
@@ -127,10 +130,14 @@ const cloudMaterial = new THREE.ShaderMaterial({
     }
 
     float getCloudDensity(vec2 uv) {
-        // Animated UVs with speed control
-        vec2 uv1 = uv * 0.8 + vec2(time * cloudSpeed, 0.0);
-        vec2 uv2 = uv * 2.5 + vec2(0.0, time * cloudSpeed * 1.0);
-        vec2 uv3 = uv * 0.3 - vec2(time * cloudSpeed * 0.5);
+        // Frequency-based speed scaling
+        float speed1 = cloudSpeed / 0.8; // Compensate for uv * 0.8
+        float speed2 = cloudSpeed / 2.5; // Compensate for uv * 2.5
+        float speed3 = cloudSpeed / 0.3; // Compensate for uv * 0.3
+
+        vec2 uv1 = uv * 0.8 + vec2(time * speed1, 0.0);
+        vec2 uv2 = uv * 2.5 + vec2(0.0, time * speed2 * 0.7); // Reduced vertical speed
+        vec2 uv3 = uv * 0.3 - vec2(time * speed3 * 0.3); // Slower diagonal movement
         
         // Cloud layers
         float baseClouds = fbm(uv1);
@@ -165,6 +172,12 @@ const cloudMaterial = new THREE.ShaderMaterial({
         float alpha = smoothstep(0.1, 0.9, density) * 0.8;
         alpha *= mix(0.8, 1.2, fbm(uv * 5.0 + time * 0.1));
         
+        // Calculate edge fade
+        vec2 localPos = vWorldPosition.xz - cloudPosition.xz;
+        float distanceFromCenter = length(localPos) / 1500.0;
+        float edgeFade = 1.0 - smoothstep(0.1, 1.0, distanceFromCenter);
+        alpha *= edgeFade;
+
         gl_FragColor = vec4(finalColor, alpha * 0.85);
     }
   `,
@@ -199,6 +212,7 @@ let gameStarted = false;
 
 function animate() {
     requestAnimationFrame(animate);
+    profiler.startFrame();
 
     if (!gameStarted) {
         if (initializationComplete) {
@@ -209,12 +223,20 @@ function animate() {
 
     if (cloudMaterial) {
         cloudMaterial.uniforms.time.value = performance.now() / 1000;
+        cloudMaterial.uniforms.cloudPosition.value.copy(clouds.position);
     }
 
     // Update water material uniforms
     if (waterMaterial && waterMaterial.uniforms && waterMaterial.uniforms.time) {
         waterMaterial.uniforms.time.value = performance.now() / 1000;
         waterMaterial.uniforms.lightDirection.value.copy(directionalLight.position).normalize();
+        waterMaterial.uniforms.fogColor.value.copy(scene.fog.color);
+        waterMaterial.uniforms.fogNear.value = scene.fog.near;
+        waterMaterial.uniforms.fogFar.value = scene.fog.far;
+        const cameraWorldPos = new THREE.Vector3();
+        camera.getWorldPosition(cameraWorldPos);
+
+        waterMaterial.uniforms.cameraPos.value.copy(cameraWorldPos);
     }
 
     Player.update(getBlock);
@@ -226,9 +248,38 @@ function animate() {
 
     // Force render even if no changes
     render(scene, camera);
+    
+    profiler.endFrame();
+    updateDebugUI();
 }
 
 animate();
+
+function updateDebugUI() {
+    const metrics = profiler.getMetrics();
+    const frameStats = [
+        `Frame: ${metrics.frame.current}ms`,
+        `Avg: ${metrics.frame.avg}ms`,
+        `Min: ${metrics.frame.min}ms`,
+        `Max: ${metrics.frame.max}ms`
+    ];
+
+    const chunkStats = [
+        `Generated: ${metrics.chunks.generated}`,
+        `Meshed: ${metrics.chunks.meshed}`,
+        `Loaded: ${Object.keys(chunkMeshes).length}`
+    ];
+
+    const memoryStats = [
+        `Geometry: ${metrics.memory.geometry}MB`,
+        `Total: ${metrics.memory.total}MB`
+    ];
+
+    document.getElementById('frame-stats').innerHTML = frameStats.join('<br>');
+    document.getElementById('chunk-stats').innerHTML = chunkStats.join('<br>');
+    document.getElementById('memory-stats').innerHTML = memoryStats.join('<br>');
+}
+
 
 // Handle window resizing
 window.addEventListener('resize', () => {
