@@ -9,13 +9,13 @@ const Player = (function () {
     const NORMAL_SPEED = 8; // Units per second
     const SPRINT_SPEED = NORMAL_SPEED * 1.4;
     const SWIM_SPEED = 1.5; // Units per second
-    const JUMP_FORCE = 8; // Units per second
+    const JUMP_FORCE = 16; // Units per second
     const GRAVITY = 20; // Units per second squared
     const WATER_GRAVITY = 4; // Units per second squared
-    const PLAYER_WIDTH = 0.9;
-    const PLAYER_HEIGHT = 1.9;
+    const PLAYER_WIDTH = 2.8;
+    const PLAYER_HEIGHT = 7.8;
     const HALF_WIDTH = PLAYER_WIDTH / 2;
-    const EYE_HEIGHT = 1.8;
+    const EYE_HEIGHT = 7.5;
     const STEP_HEIGHT = 1.0; // Maximum height of a step the player can automatically climb
 
 
