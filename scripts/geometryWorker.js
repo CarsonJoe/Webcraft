@@ -137,6 +137,7 @@ self.onmessage = function (e) {
 function generateGeometry(chunkX, chunkZ, chunkData, adjacentChunks) {
     const solid = { positions: [], normals: [], colors: [], indices: [] };
     const water = { positions: [], normals: [], indices: [] };
+    const leaves = { positions: [], offsets: [], colors: [], indices: [] };
 
     // Moved addFace inside generateGeometry and added AO calculations
     const addFace = (isWater, normal, localX, localY, localZ, color, isLeaf = false) => {
@@ -290,23 +291,28 @@ function generateGeometry(chunkX, chunkZ, chunkData, adjacentChunks) {
                     chunkZ * CHUNK_SIZE + z,
                     blockType
                 );
-                const finalColor = isWater ? baseColor : // Use base color directly for water
-                    baseColor.map((c, i) => Math.min(1, Math.max(0, c * colorMultipliers[i])));
+                const finalColor = baseColor.map((c, i) => Math.min(1, Math.max(0, c * colorMultipliers[i])));
 
                 if (isLeaf) {
-                    // Render all faces for leaves and apply independent rotation
-                    if ((isWater && neighbors.px === 0) || (!isWater && isTransparent(neighbors.px)))
-                        addFace(isWater, [1, 0, 0], x, y, z, finalColor, true); // Right face
-                    if ((isWater && neighbors.nx === 0) || (!isWater && isTransparent(neighbors.nx)))
-                        addFace(isWater, [-1, 0, 0], x, y, z, finalColor, true); // Left face
-                    if ((isWater && neighbors.py === 0) || (!isWater && isTransparent(neighbors.py)))
-                        addFace(isWater, [0, 1, 0], x, y, z, finalColor, true); // Top face
-                    if ((isWater && neighbors.ny === 0) || (!isWater && isTransparent(neighbors.ny)))
-                        addFace(isWater, [0, -1, 0], x, y, z, finalColor, true); // Bottom face
-                    if ((isWater && neighbors.pz === 0) || (!isWater && isTransparent(neighbors.pz)))
-                        addFace(isWater, [0, 0, 1], x, y, z, finalColor, true); // Front face
-                    if ((isWater && neighbors.nz === 0) || (!isWater && isTransparent(neighbors.nz)))
-                        addFace(isWater, [0, 0, -1], x, y, z, finalColor, true); // Back face
+                    const cx = x + 0.5;
+                    const cy = y + 0.5;
+                    const cz = z + 0.5;
+                    const offsets = [
+                        [-0.5, -0.5], [0.5, -0.5],
+                        [0.5, 0.5], [-0.5, 0.5]
+                    ];
+                    const baseIndex = leaves.positions.length / 3;
+
+                    offsets.forEach(([ox, oy]) => {
+                        leaves.positions.push(cx, cy, cz);
+                        leaves.offsets.push(ox, oy);
+                        leaves.colors.push(...finalColor);
+                    });
+
+                    leaves.indices.push(
+                        baseIndex, baseIndex + 1, baseIndex + 2,
+                        baseIndex, baseIndex + 2, baseIndex + 3
+                    );
                 } else {
                     // Existing face checks for other block types
                     if ((isWater && neighbors.px === 0) || (!isWater && isTransparent(neighbors.px)))
@@ -331,7 +337,17 @@ function generateGeometry(chunkX, chunkZ, chunkData, adjacentChunks) {
         chunkX,
         chunkZ,
         solid: packageGeometry(solid),
-        water: packageGeometry(water)
+        water: packageGeometry(water),
+        leaves: packageLeavesGeometry(leaves) || { positions: [], offsets: [], colors: [], indices: [] }
+    };
+}
+
+function packageLeavesGeometry(leaves) {
+    return {
+        positions: new Float32Array(leaves.positions),
+        offsets: new Float32Array(leaves.offsets),
+        colors: new Float32Array(leaves.colors),
+        indices: new Uint32Array(leaves.indices)
     };
 }
 

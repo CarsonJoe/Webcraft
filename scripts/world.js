@@ -1,6 +1,5 @@
 import { CHUNK_SIZE, CHUNK_HEIGHT, WATER_LEVEL, RENDER_DISTANCE } from './constants.js';
 import { chunkMeshes, removeChunkGeometry, scene } from './renderer.js';
-import { profiler } from './profiler.js';
 
 // Chunk states and initialization flags
 const CHUNK_LOADING = 1;
@@ -43,7 +42,7 @@ const materials = {
     4: { color: 0xe3dda6 }, // Sand
     5: { color: 0x6380ec }, // Water
     6: { color: 0x7b6e65 }, // Wood
-    7: { color: 0x228B22 }, // Leaves
+    7: { color: 0x1f541f }, // Leaves
     8: { color: 0x3b4044 }, // Slate
     9: { color: 0xFFFFFF }  // Limestone
 };
@@ -228,6 +227,9 @@ export const waterMaterial = new THREE.ShaderMaterial({
     depthWrite: false
 });
 
+
+let leavesMaterial = null;
+
 // Initialize world systems
 export function initWorld() {
     console.log("[World] Initializing world system...");
@@ -255,14 +257,8 @@ export function initWorld() {
         worker.onmessage = function (e) {
             if (e.data.type === 'geometry_data') {
                 try {
-                    profiler.endTimer('meshGeneration');
-                    if (e.data.isInitialGeneration) {
-                        profiler.trackChunkGenerated();
-                    } else {
-                        profiler.trackChunkMeshed();
-                    }
-                    if (e.data.solid.positions.length > 0 || e.data.water.positions.length > 0) {
-                        createChunkMeshes(e.data.chunkX, e.data.chunkZ, e.data.solid, e.data.water);
+                    if (e.data.solid.positions.length > 0 || e.data.water.positions.length > 0 || e.data.leaves.positions.length > 0) {
+                        createChunkMeshes(e.data.chunkX, e.data.chunkZ, e.data.solid, e.data.water, e.data.leaves);
                     }
                 } catch (error) {
                     console.error('Error processing geometry:', error);
@@ -335,43 +331,157 @@ export function initWorld() {
     });
 }
 
-// scripts/world.js
-function createChunkMeshes(chunkX, chunkZ, solidData, waterData) {
+function createChunkMeshes(chunkX, chunkZ, solidData, waterData, leavesData) {
     const chunkKey = `${chunkX},${chunkZ}`;
 
-    // Remove existing meshes if they exist
-    if (chunkMeshes[chunkKey]) {
-        scene.remove(chunkMeshes[chunkKey].solid);
-        scene.remove(chunkMeshes[chunkKey].water);
-        chunkMeshes[chunkKey].solid.geometry.dispose();
-        chunkMeshes[chunkKey].water.geometry.dispose();
+    // Initialize leaves material once
+    if (!leavesMaterial) {
+        leavesMaterial = new THREE.ShaderMaterial({
+            uniforms: THREE.UniformsUtils.merge([
+                THREE.UniformsLib.fog, // Includes fogColor, fogNear, fogFar
+                {
+                    // Add any custom uniforms here if needed
+                }
+            ]),
+            vertexShader: `
+                varying vec3 vColor;
+                varying float vFogDepth;
+                attribute vec2 offset;
+
+                void main() {
+                    vec4 worldPosition = modelMatrix * vec4(position, 1.0);
+                    
+                    // Billboard calculations
+                    vec3 look = normalize(worldPosition.xyz - cameraPosition);
+                    vec3 right = normalize(cross(vec3(0.0, 1.0, 0.0), look));
+                    vec3 up = cross(look, right);
+                    
+                    // Apply 1.7x scale
+                    vec3 pos = worldPosition.xyz;
+                    pos += right * offset.x * 1.36; // 0.8 * 1.7
+                    pos += up * offset.y * 1.36;
+                    
+                    // Transform to view space
+                    vec4 mvPosition = viewMatrix * vec4(pos, 1.0);
+                    gl_Position = projectionMatrix * mvPosition;
+                    
+                    // Depth adjustments
+                    gl_Position.z -= 0.0003; // Depth bias
+                    vFogDepth = -mvPosition.z; // For fog calculation
+                    
+                    vColor = color;
+                }
+            `,
+            fragmentShader: `
+                uniform vec3 fogColor;
+                uniform float fogNear;
+                uniform float fogFar;
+                
+                varying vec3 vColor;
+                varying float vFogDepth;
+                
+                void main() {
+                    // Base color
+                    vec3 color = vColor;
+                    
+                    // Fog calculation
+                    float fogFactor = smoothstep(fogNear, fogFar, vFogDepth);
+                    
+                    // Apply fog
+                    color = mix(color, fogColor, fogFactor);
+                    
+                    gl_FragColor = vec4(color, 1.0);
+                }
+            `,
+            transparent: false,
+            depthWrite: true,
+            depthTest: true,
+            alphaTest: 0.5,
+            fog: true,
+            vertexColors: true,
+            side: THREE.DoubleSide,
+            polygonOffset: true,
+            polygonOffsetFactor: 1.0,
+            polygonOffsetUnits: 1.0,
+        });
     }
 
-    // Create geometries
-    const solidGeometry = createGeometryFromData(solidData);
-    const waterGeometry = createGeometryFromData(waterData);
+    // Remove existing meshes safely
+    if (chunkMeshes[chunkKey]) {
+        const { solid, water, leaves } = chunkMeshes[chunkKey];
+        
+        // Always remove from scene if they exist
+        if (solid) {
+            scene.remove(solid);
+            if (solid.geometry) solid.geometry.dispose();
+        }
+        if (water) {
+            scene.remove(water);
+            if (water.geometry) water.geometry.dispose();
+        }
+        if (leaves) {
+            scene.remove(leaves);
+            if (leaves.geometry) leaves.geometry.dispose();
+        }
+    }
 
-    // Create meshes with shared materials
-    const solidMesh = new THREE.Mesh(solidGeometry, solidMaterial);
-    const waterMesh = new THREE.Mesh(waterGeometry, waterMaterial);
+    // Create new meshes only if they have geometry
+    let solidMesh = null;
+    let waterMesh = null;
+    let leavesMesh = null;
 
-    // Position meshes
+    // Create solid mesh if data exists
+    if (solidData?.positions?.length > 0) {
+        const solidGeometry = createGeometryFromData(solidData);
+        solidMesh = new THREE.Mesh(solidGeometry, solidMaterial);
+    }
+
+    // Create water mesh if data exists
+    if (waterData?.positions?.length > 0) {
+        const waterGeometry = createGeometryFromData(waterData);
+        waterMesh = new THREE.Mesh(waterGeometry, waterMaterial);
+    }
+
+    // Create leaves mesh if data exists
+    if (leavesData?.positions?.length > 0) {
+        const leavesGeometry = new THREE.BufferGeometry();
+        leavesGeometry.setAttribute('position', new THREE.BufferAttribute(leavesData.positions, 3));
+        leavesGeometry.setAttribute('offset', new THREE.BufferAttribute(leavesData.offsets, 2));
+        leavesGeometry.setAttribute('color', new THREE.BufferAttribute(leavesData.colors, 3));
+        leavesGeometry.setIndex(new THREE.BufferAttribute(leavesData.indices, 1));
+        leavesMesh = new THREE.Mesh(leavesGeometry, leavesMaterial);
+        leavesMesh.frustumCulled = false;
+        leavesMesh.renderOrder = 1;
+    }
+
+    // Position and add meshes to scene
     const worldX = chunkX * CHUNK_SIZE;
     const worldZ = chunkZ * CHUNK_SIZE;
-    solidMesh.position.set(worldX, 0, worldZ);
-    waterMesh.position.set(worldX, 0, worldZ);
 
-    // Add to scene
-    scene.add(solidMesh);
-    scene.add(waterMesh);
+    if (solidMesh) {
+        solidMesh.position.set(worldX, 0, worldZ);
+        scene.add(solidMesh);
+        solidMesh.castShadow = true;
+        solidMesh.receiveShadow = true;
+    }
 
-    // Store references
-    chunkMeshes[chunkKey] = { solid: solidMesh, water: waterMesh };
+    if (waterMesh) {
+        waterMesh.position.set(worldX, 0, worldZ);
+        scene.add(waterMesh);
+        waterMesh.receiveShadow = true;
+    }
 
-    // Enable shadows
-    solidMesh.castShadow = true;
-    solidMesh.receiveShadow = true;
-    waterMesh.receiveShadow = true;
+    if (leavesMesh) {
+        leavesMesh.position.set(worldX, 0, worldZ);
+        scene.add(leavesMesh);
+    }
+
+    // Update chunk meshes reference
+    chunkMeshes[chunkKey] = { 
+        solid: solidMesh || null, 
+        water: waterMesh || null, 
+        leaves: leavesMesh || null 
+    };
 }
 
 function createGeometryFromData(data) {
@@ -449,7 +559,6 @@ function addToLoadQueue(x, z) {
 
 function processChunkQueue() {
     if (!workerInitialized || !sceneReady) return;
-    profiler.startTimer('chunkProcessing');
 
     const now = performance.now();
     const timeSinceLastFrame = now - lastFrameTime;
@@ -476,7 +585,6 @@ function processChunkQueue() {
             chunkStates[chunkKey] = CHUNK_LOADING;
             chunkWorker.postMessage({ chunkX: x, chunkZ: z });
             processed++;
-            profiler.trackChunkGenerated();
         }
 
         if (performance.now() - startTime > frameBudget) break;
@@ -507,7 +615,6 @@ function processChunkQueue() {
             if (!neighborsLoaded) return;
         }
     
-        profiler.startTimer('meshGeneration');
         const chunkData = chunks[chunkKey];
         const clonedChunkData = new Int8Array(chunkData).buffer;
     
@@ -547,8 +654,6 @@ function processChunkQueue() {
     if (chunkLoadQueue.length > 0 || remeshQueue.size > 0) {
         requestAnimationFrame(processChunkQueue);
     }
-
-    profiler.endTimer('chunkProcessing');
 }
 
 function getBlock(x, y, z) {

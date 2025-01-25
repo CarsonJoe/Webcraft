@@ -315,7 +315,6 @@ File: ./scripts/world.js
 
 import { CHUNK_SIZE, CHUNK_HEIGHT, WATER_LEVEL, RENDER_DISTANCE } from './constants.js';
 import { chunkMeshes, removeChunkGeometry, scene } from './renderer.js';
-import { profiler } from './profiler.js';
 
 // Chunk states and initialization flags
 const CHUNK_LOADING = 1;
@@ -570,12 +569,6 @@ export function initWorld() {
         worker.onmessage = function (e) {
             if (e.data.type === 'geometry_data') {
                 try {
-                    profiler.endTimer('meshGeneration');
-                    if (e.data.isInitialGeneration) {
-                        profiler.trackChunkGenerated();
-                    } else {
-                        profiler.trackChunkMeshed();
-                    }
                     if (e.data.solid.positions.length > 0 || e.data.water.positions.length > 0) {
                         createChunkMeshes(e.data.chunkX, e.data.chunkZ, e.data.solid, e.data.water);
                     }
@@ -738,39 +731,32 @@ function updateAdjacentChunks(chunkX, chunkZ) {
     });
 }
 
-function addToLoadQueue(x, z, priority = Infinity) {
+const PRIORITY_BANDS = [
+    {distance: 2, chunksPerFrame: 5},    // Immediate area
+    {distance: 4, chunksPerFrame: 3},    // Near area
+    {distance: RENDER_DISTANCE * 2, chunksPerFrame: 2} // Far area
+];
+
+function addToLoadQueue(x, z) {
     const chunkKey = `${x},${z}`;
-    const dx = x - currentPlayerChunkX;
-    const dz = z - currentPlayerChunkZ;
+    const dx = Math.abs(x - currentPlayerChunkX);
+    const dz = Math.abs(z - currentPlayerChunkZ);
+    const distance = dx + dz; // Manhattan distance
 
-    // 1. Skip out-of-bounds chunks
-    if (Math.abs(dx) > RENDER_DISTANCE + 1 || Math.abs(dz) > RENDER_DISTANCE + 1) return;
+    // Skip if out of bounds or already queued
+    if (distance > RENDER_DISTANCE * 2 + 1 || queuedChunks.has(chunkKey)) return;
 
-    // 2. Skip if already queued
-    if (queuedChunks.has(chunkKey)) return;
+    // Assign priority band
+    let priority = PRIORITY_BANDS.findIndex(b => distance <= b.distance);
+    priority = priority === -1 ? PRIORITY_BANDS.length : priority;
 
-    // 3. Add to queue and tracking set
-    const distanceSq = dx * dx + dz * dz;
-    chunkLoadQueue.push({ x, z, priority, distanceSq });
+    // Store in simple array with priority
+    chunkLoadQueue.push({x, z, priority});
     queuedChunks.add(chunkKey);
-
-    // 4. Maintain heap property (O(log n) insertion)
-    let index = chunkLoadQueue.length - 1;
-    while (index > 0) {
-        const parentIndex = Math.floor((index - 1) / 2);
-        if (
-            chunkLoadQueue[parentIndex].priority < chunkLoadQueue[index].priority ||
-            (chunkLoadQueue[parentIndex].priority === chunkLoadQueue[index].priority &&
-                chunkLoadQueue[parentIndex].distanceSq <= chunkLoadQueue[index].distanceSq)
-        ) break;
-        [chunkLoadQueue[parentIndex], chunkLoadQueue[index]] = [chunkLoadQueue[index], chunkLoadQueue[parentIndex]];
-        index = parentIndex;
-    }
 }
 
 function processChunkQueue() {
     if (!workerInitialized || !sceneReady) return;
-    profiler.startTimer('chunkProcessing');
 
     const now = performance.now();
     const timeSinceLastFrame = now - lastFrameTime;
@@ -797,7 +783,6 @@ function processChunkQueue() {
             chunkStates[chunkKey] = CHUNK_LOADING;
             chunkWorker.postMessage({ chunkX: x, chunkZ: z });
             processed++;
-            profiler.trackChunkGenerated();
         }
 
         if (performance.now() - startTime > frameBudget) break;
@@ -828,7 +813,6 @@ function processChunkQueue() {
             if (!neighborsLoaded) return;
         }
     
-        profiler.startTimer('meshGeneration');
         const chunkData = chunks[chunkKey];
         const clonedChunkData = new Int8Array(chunkData).buffer;
     
@@ -868,8 +852,6 @@ function processChunkQueue() {
     if (chunkLoadQueue.length > 0 || remeshQueue.size > 0) {
         requestAnimationFrame(processChunkQueue);
     }
-
-    profiler.endTimer('chunkProcessing');
 }
 
 function getBlock(x, y, z) {
@@ -1044,6 +1026,7 @@ export {
     addToLoadQueue,
     initializationComplete,
 };
+
 
 ================================================================================
 File: ./scripts/chunksWorker.js
@@ -1233,8 +1216,6 @@ function generateChunk(chunkX, chunkZ) {
         }
     });
 
-    // console.log('[Chunk Worker] Chunk Generated');
-
 
     return chunk;
 }
@@ -1295,40 +1276,38 @@ function generateChunkFeatures(chunkX, chunkZ) {
 
 const TREE_SCALE = 1; // Adjust this value to scale tree size
 
-function generateLargeTree(chunk, chunkX, chunkZ, worldX, worldZ, baseHeight) {
-    const treeHeight = Math.floor((Math.random() * 30 + 15)) * TREE_SCALE;
-    const trunkHeight = Math.floor(treeHeight * 0.7);
-    const leafRadius = Math.floor(treeHeight * 0.4) + 2 * TREE_SCALE;
-
+function generateLargeTree(chunk, chunkX, chunkZ, worldX, worldZ, baseHeight, scale = 2.0) {
+    // Scale-adjusted tree dimensions
+    const treeHeight = Math.max(5, Math.floor((Math.random() * 10 + 15) * scale));
+    const trunkHeight = Math.max(3, Math.floor(treeHeight * 0.7));
+    const leafRadius = Math.floor(treeHeight * 0.4) + 2;
+    
     // Precompute chunk boundaries
     const chunkStartX = chunkX * CHUNK_SIZE;
     const chunkEndX = chunkStartX + CHUNK_SIZE - 1;
     const chunkStartZ = chunkZ * CHUNK_SIZE;
     const chunkEndZ = chunkStartZ + CHUNK_SIZE - 1;
 
-    // Early exit if trunk base is blocked in this chunk
+    // Early exit if trunk base is blocked
     const localX = worldX - chunkStartX;
     const localZ = worldZ - chunkStartZ;
     if (localX >= 0 && localX < CHUNK_SIZE && localZ >= 0 && localZ < CHUNK_SIZE) {
         if (getBlockInChunk(chunk, localX, baseHeight, localZ) === 6) return;
     }
 
-    // Spherical leaves generation
+    // Optimized leaves generation with scale-aware parameters
+    const leafStartOffset = Math.floor(5 * scale);
+    const leavesStartY = baseHeight + trunkHeight - leafStartOffset;
     const leavesEndY = baseHeight + treeHeight;
-    const leavesStartY = leavesEndY - trunkHeight * 0.5;
-    const leafCenterY = (leavesStartY + leavesEndY) / 2;
-    const verticalLeafRadius = (leavesEndY - leavesStartY) / 2;
+    const leafTaperRate = 3 * scale;
     
     for (let y = leavesStartY; y <= leavesEndY; y++) {
-        const verticalOffset = (y - leafCenterY) / verticalLeafRadius;
-        if (Math.abs(verticalOffset) > 1) continue;
-        
-        const horizontalRadius = Math.floor(leafRadius * Math.sqrt(1 - verticalOffset * verticalOffset));
-        if (horizontalRadius <= 0) continue;
-        
-        const radiusSq = horizontalRadius * horizontalRadius;
-        const dxMin = Math.max(-horizontalRadius, chunkStartX - worldX);
-        const dxMax = Math.min(horizontalRadius, chunkEndX - worldX);
+        const radius = leafRadius - Math.floor((y - leavesStartY) / leafTaperRate);
+        if (radius <= 0) continue;
+
+        const radiusSq = radius * radius;
+        const dxMin = Math.max(-radius, chunkStartX - worldX);
+        const dxMax = Math.min(radius, chunkEndX - worldX);
         
         for (let dx = dxMin; dx <= dxMax; dx++) {
             const xSq = dx * dx;
@@ -1343,20 +1322,19 @@ function generateLargeTree(chunk, chunkX, chunkZ, worldX, worldZ, baseHeight) {
                 setBlockIfInChunk(
                     chunk, chunkX, chunkZ,
                     worldX + dx, worldZ + dz, y,
-                    7, // Leaves
-                    0.2 + Math.random() * 0.3 // Add some density variation
+                    7, 0.2
                 );
             }
         }
     }
 
-    // Improved trunk generation with scaling
+    // Optimized trunk generation with scaled curvature
     const bendDirection = Math.random() * Math.PI * 2;
     const cosBend = Math.cos(bendDirection);
     const sinBend = Math.sin(bendDirection);
-    const baseRadius = 1.3 * TREE_SCALE;
-    const topRadius = 1 * TREE_SCALE;
-    const bendAmount = 2.5 * TREE_SCALE;
+    const baseRadius = 1.3 * scale;
+    const topRadius = 1.0 * scale;
+    const bendAmount = 2.5 * scale;
 
     for (let yRel = 0; yRel < trunkHeight; yRel++) {
         const worldY = baseHeight + yRel;
@@ -1371,7 +1349,7 @@ function generateLargeTree(chunk, chunkX, chunkZ, worldX, worldZ, baseHeight) {
         const trunkX = worldX + bendAmount * bendProgress * cosBend;
         const trunkZ = worldZ + bendAmount * bendProgress * sinBend;
 
-        // Calculate dx bounds for current chunk
+        // Calculate chunk-optimized bounds
         const dxMin = Math.max(-maxD, Math.ceil(chunkStartX - 0.5 - trunkX));
         const dxMax = Math.min(maxD, Math.floor(chunkEndX + 0.5 - trunkX - 1e-9));
         if (dxMin > dxMax) continue;
@@ -1391,8 +1369,7 @@ function generateLargeTree(chunk, chunkX, chunkZ, worldX, worldZ, baseHeight) {
                     chunk, chunkX, chunkZ,
                     Math.round(trunkX + dx),
                     Math.round(trunkZ + dz),
-                    worldY,
-                    6 // Wood
+                    worldY, 6
                 );
             }
         }
@@ -1885,8 +1862,8 @@ function getBlockInWorld(currentChunkX, currentChunkZ, localX, localY, localZ, c
         return getBlock(adjChunkData, targetLocalX, localY, targetLocalZ);
     }
 
-    // Default to air if chunk not found
-    return 0;
+    // Treat unloaded chunks as non-transparent (stone)
+    return 3; // Changed from 0 to 3 (stone)
 }
 
 // Helper functions

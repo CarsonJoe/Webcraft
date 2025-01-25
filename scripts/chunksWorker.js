@@ -182,8 +182,6 @@ function generateChunk(chunkX, chunkZ) {
         }
     });
 
-    // console.log('[Chunk Worker] Chunk Generated');
-
 
     return chunk;
 }
@@ -244,10 +242,12 @@ function generateChunkFeatures(chunkX, chunkZ) {
 
 const TREE_SCALE = 1; // Adjust this value to scale tree size
 
-function generateLargeTree(chunk, chunkX, chunkZ, worldX, worldZ, baseHeight) {
-    const treeHeight = Math.floor((Math.random() * 30 + 15)) * TREE_SCALE;
+function generateLargeTree(chunk, chunkX, chunkZ, worldX, worldZ, baseHeight, scale = 1.5) {
+    // Calculate scaled tree dimensions
+    const unscaledHeight = Math.floor(Math.random() * 10) + 15;
+    const treeHeight = Math.max(1, Math.floor(unscaledHeight * scale));
     const trunkHeight = Math.floor(treeHeight * 0.7);
-    const leafRadius = Math.floor(treeHeight * 0.4) + 2 * TREE_SCALE;
+    const leafRadius = Math.floor(treeHeight * 0.4) + Math.floor(2 * scale);
 
     // Precompute chunk boundaries
     const chunkStartX = chunkX * CHUNK_SIZE;
@@ -255,29 +255,23 @@ function generateLargeTree(chunk, chunkX, chunkZ, worldX, worldZ, baseHeight) {
     const chunkStartZ = chunkZ * CHUNK_SIZE;
     const chunkEndZ = chunkStartZ + CHUNK_SIZE - 1;
 
-    // Early exit if trunk base is blocked in this chunk
+    // Early exit if trunk base is blocked
     const localX = worldX - chunkStartX;
     const localZ = worldZ - chunkStartZ;
     if (localX >= 0 && localX < CHUNK_SIZE && localZ >= 0 && localZ < CHUNK_SIZE) {
         if (getBlockInChunk(chunk, localX, baseHeight, localZ) === 6) return;
     }
 
-    // Spherical leaves generation
+    // Optimized leaves generation
+    const leavesStartY = baseHeight + Math.max(0, trunkHeight - Math.floor(5 * scale));
     const leavesEndY = baseHeight + treeHeight;
-    const leavesStartY = leavesEndY - trunkHeight * 0.5;
-    const leafCenterY = (leavesStartY + leavesEndY) / 2;
-    const verticalLeafRadius = (leavesEndY - leavesStartY) / 2;
-    
     for (let y = leavesStartY; y <= leavesEndY; y++) {
-        const verticalOffset = (y - leafCenterY) / verticalLeafRadius;
-        if (Math.abs(verticalOffset) > 1) continue;
-        
-        const horizontalRadius = Math.floor(leafRadius * Math.sqrt(1 - verticalOffset * verticalOffset));
-        if (horizontalRadius <= 0) continue;
-        
-        const radiusSq = horizontalRadius * horizontalRadius;
-        const dxMin = Math.max(-horizontalRadius, chunkStartX - worldX);
-        const dxMax = Math.min(horizontalRadius, chunkEndX - worldX);
+        const radius = leafRadius - Math.floor((y - leavesStartY) / 3);
+        if (radius <= 0) continue;
+
+        const radiusSq = radius * radius;
+        const dxMin = Math.max(-radius, chunkStartX - worldX);
+        const dxMax = Math.min(radius, chunkEndX - worldX);
         
         for (let dx = dxMin; dx <= dxMax; dx++) {
             const xSq = dx * dx;
@@ -292,20 +286,19 @@ function generateLargeTree(chunk, chunkX, chunkZ, worldX, worldZ, baseHeight) {
                 setBlockIfInChunk(
                     chunk, chunkX, chunkZ,
                     worldX + dx, worldZ + dz, y,
-                    7, // Leaves
-                    0.2 + Math.random() * 0.3 // Add some density variation
+                    7, 0.08 // 8% leaves
                 );
             }
         }
     }
 
-    // Improved trunk generation with scaling
+    // Optimized trunk generation with bending
     const bendDirection = Math.random() * Math.PI * 2;
     const cosBend = Math.cos(bendDirection);
     const sinBend = Math.sin(bendDirection);
-    const baseRadius = 1.3 * TREE_SCALE;
-    const topRadius = 1 * TREE_SCALE;
-    const bendAmount = 2.5 * TREE_SCALE;
+    const baseRadius = 1.3 * scale;
+    const topRadius = 1.0 * scale;
+    const bendAmount = 2.5 * scale;
 
     for (let yRel = 0; yRel < trunkHeight; yRel++) {
         const worldY = baseHeight + yRel;
@@ -340,8 +333,7 @@ function generateLargeTree(chunk, chunkX, chunkZ, worldX, worldZ, baseHeight) {
                     chunk, chunkX, chunkZ,
                     Math.round(trunkX + dx),
                     Math.round(trunkZ + dz),
-                    worldY,
-                    6 // Wood
+                    worldY, 6
                 );
             }
         }

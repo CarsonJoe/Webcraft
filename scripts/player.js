@@ -93,11 +93,17 @@ const Player = (function () {
     };
 
     function onMouseDown(event) {
+
         if (document.pointerLockElement !== document.querySelector('canvas')) return;
 
         raycaster.setFromCamera(new THREE.Vector2(0, 0), camera);
-        const intersects = raycaster.intersectObjects(Object.values(chunkMeshes).flatMap(mesh => [mesh.solid, mesh.water]));
 
+        // Filter out null meshes before intersection check
+        const meshesToCheck = Object.values(chunkMeshes)
+            .flatMap(mesh => [mesh.solid, mesh.water, mesh.leaves])
+            .filter(mesh => mesh !== null);
+
+        const intersects = raycaster.intersectObjects(meshesToCheck);
         if (intersects.length > 0) {
             const intersect = intersects[0];
             const normal = intersect.face.normal;
@@ -219,7 +225,7 @@ const Player = (function () {
         } else {
             // Original movement and physics (non-flying)
             isSwimming = checkWaterCollision(yawObject.position.x, yawObject.position.y + EYE_HEIGHT / 2, yawObject.position.z);
-        
+
             if (keys['Space']) {
                 if (isSwimming) {
                     velocity.y = SWIM_SPEED; // Swim upwards
@@ -228,7 +234,7 @@ const Player = (function () {
                     canJump = false;
                 }
             }
-        
+
             // Apply gravity and vertical collision detection
             velocity.y -= (isSwimming ? WATER_GRAVITY : GRAVITY) * deltaTime;
             if (checkCollision(yawObject.position.x, yawObject.position.y + velocity.y * deltaTime, yawObject.position.z)) {
@@ -238,21 +244,21 @@ const Player = (function () {
                 velocity.y = 0;
             }
             yawObject.position.y += velocity.y * deltaTime;
-        
+
             // Check if the player is in leaves
             const isInLeaves = checkInLeaves();
-        
+
             // Adjust movement speed based on whether the player is in leaves
             let currentSpeed = isSwimming ? SWIM_SPEED : (isSprinting ? SPRINT_SPEED : NORMAL_SPEED);
             if (isInLeaves) {
                 currentSpeed *= 0.5; // Reduce speed by 50% when in leaves
             }
-        
+
             // Horizontal movement and collision detection with auto-jump
             const movement = direction.multiplyScalar(currentSpeed * deltaTime);
             const newX = yawObject.position.x + movement.x;
             const newZ = yawObject.position.z + movement.z;
-        
+
             // Check for collision at the new position (ignoring leaves)
             if (checkCollision(newX, yawObject.position.y, newZ)) {
                 // Check if we can step up

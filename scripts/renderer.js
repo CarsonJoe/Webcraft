@@ -55,14 +55,24 @@ export function updateFPSCounter() {
 
 export function removeChunkGeometry(chunkX, chunkZ) {
     const chunkKey = `${chunkX},${chunkZ}`;
-    if (chunkMeshes[chunkKey]) {
-        scene.remove(chunkMeshes[chunkKey].solid);
-        scene.remove(chunkMeshes[chunkKey].water);
-        chunkMeshes[chunkKey].solid.geometry.dispose();
-        chunkMeshes[chunkKey].water.geometry.dispose();
-        // Don't dispose materials - they're shared!
-        delete chunkMeshes[chunkKey];
-    }
+    const chunkMesh = chunkMeshes[chunkKey];
+    
+    if (!chunkMesh) return;
+
+    // Safely handle each mesh type
+    const handleMesh = (mesh) => {
+        if (!mesh) return;
+        if (mesh.geometry) {
+            scene.remove(mesh);
+            mesh.geometry.dispose();
+        }
+    };
+
+    handleMesh(chunkMesh.solid);
+    handleMesh(chunkMesh.water);
+    handleMesh(chunkMesh.leaves);
+
+    delete chunkMeshes[chunkKey];
 }
 
 export function createSkybox(scene, renderer) {
@@ -95,24 +105,34 @@ export function render(scene, camera) {
     frustum.setFromProjectionMatrix(projScreenMatrix);
 
     for (const chunkKey in chunkMeshes) {
-        const { solid, water } = chunkMeshes[chunkKey];
+        const { solid, water, leaves } = chunkMeshes[chunkKey];
         
-        if (solid.boundingSphere) {
-            solid.visible = frustum.intersectsSphere(solid.boundingSphere);
-        } else {
-            solid.visible = true; // If no bounding sphere, always render
+        // Check solid mesh
+        if (solid) {
+            if (solid.boundingSphere) {
+                solid.visible = frustum.intersectsSphere(solid.boundingSphere);
+            } else {
+                solid.visible = true;
+            }
         }
 
-        if (water.boundingSphere) {
-            water.visible = frustum.intersectsSphere(water.boundingSphere);
-        } else {
-            water.visible = true; // If no bounding sphere, always render
+        // Check water mesh
+        if (water) {
+            if (water.boundingSphere) {
+                water.visible = frustum.intersectsSphere(water.boundingSphere);
+            } else {
+                water.visible = true;
+            }
+        }
+
+        // Check leaves mesh if needed
+        if (leaves) {
+            leaves.visible = true; // Leaves are always visible (frustum culling disabled)
         }
     }
 
     renderer.render(scene, camera);
     updateFPSCounter();
-
 }
 
 export function updateFog(timeOfDay) {
