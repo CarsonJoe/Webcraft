@@ -326,7 +326,6 @@ function generateGeometry(chunkX, chunkZ, chunkData, adjacentChunks) {
         }
     }
 
-    console.log("[Geometry Worker] Geometry Generated");
 
     return {
         chunkX,
@@ -366,8 +365,8 @@ function getBlockInWorld(currentChunkX, currentChunkZ, localX, localY, localZ, c
         return getBlock(adjChunkData, targetLocalX, localY, targetLocalZ);
     }
 
-    // Default to air if chunk not found
-    return 0;
+    // Treat unloaded chunks as non-transparent (stone)
+    return 3; // Changed from 0 to 3 (stone)
 }
 
 // Helper functions

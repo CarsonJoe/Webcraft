@@ -321,7 +321,8 @@ import { profiler } from './profiler.js';
 const CHUNK_LOADING = 1;
 const CHUNK_LOADED = 2;
 let chunkWorker = null;
-let geometryWorker = null;
+export let geometryWorkers = [];
+let currentGeometryWorkerIndex = 0;
 let initializationComplete = false;
 let workerInitialized = false;
 let sceneReady = false;
@@ -555,34 +556,36 @@ export function initWorld() {
     spawnPoint = findSuitableSpawnPoint(0, 0);
     console.log("Generated spawn point:", spawnPoint);
 
-    geometryWorker = new Worker(new URL('./geometryWorker.js', import.meta.url), { type: 'module' });
-    geometryWorker.postMessage({
-        type: 'init',
-        materials: materials,
-        seed: SEED
-    });
+    const workerCount = navigator.hardwareConcurrency || 4;
+    geometryWorkers = [];
 
-    geometryWorker.onmessage = function (e) {
-        if (e.data.type === 'geometry_data') {
-            try {
-                profiler.endTimer('meshGeneration');
-                
-                // Track based on generation type
-                if (e.data.isInitialGeneration) {
-                    profiler.trackChunkGenerated();
-                } else {
-                    profiler.trackChunkMeshed();
+    for (let i = 0; i < workerCount; i++) {
+        const worker = new Worker(new URL('./geometryWorker.js', import.meta.url), { type: 'module' });
+        worker.postMessage({
+            type: 'init',
+            materials: materials,
+            seed: SEED
+        });
+
+        worker.onmessage = function (e) {
+            if (e.data.type === 'geometry_data') {
+                try {
+                    profiler.endTimer('meshGeneration');
+                    if (e.data.isInitialGeneration) {
+                        profiler.trackChunkGenerated();
+                    } else {
+                        profiler.trackChunkMeshed();
+                    }
+                    if (e.data.solid.positions.length > 0 || e.data.water.positions.length > 0) {
+                        createChunkMeshes(e.data.chunkX, e.data.chunkZ, e.data.solid, e.data.water);
+                    }
+                } catch (error) {
+                    console.error('Error processing geometry:', error);
                 }
-                
-                // Only create meshes if geometry exists
-                if (e.data.solid.positions.length > 0 || e.data.water.positions.length > 0) {
-                    createChunkMeshes(e.data.chunkX, e.data.chunkZ, e.data.solid, e.data.water);
-                }
-            } catch (error) {
-                console.error('Error processing geometry:', error);
             }
-        }
-    };
+        };
+        geometryWorkers.push(worker);
+    }
 
     chunkWorker = new Worker(new URL('./chunksWorker.js', import.meta.url), {
         type: 'module'
@@ -624,7 +627,10 @@ export function initWorld() {
             });
 
             // 4. Send message with transferrable buffers
-            geometryWorker.postMessage({
+            const worker = geometryWorkers[currentGeometryWorkerIndex];
+            currentGeometryWorkerIndex = (currentGeometryWorkerIndex + 1) % geometryWorkers.length;
+
+            worker.postMessage({
                 type: 'process_chunk',
                 chunkX,
                 chunkZ,
@@ -814,8 +820,8 @@ function processChunkQueue() {
     
         if (!isEdgeChunk) {
             // Check if all neighbors are loaded
-            const neighborsLoaded = [[1,0], [-1,0], [0,1], [0,-1]].every(([dx, dz]) => {
-                const neighborKey = `${x+dx},${z+dz}`;
+            const neighborsLoaded = [[1, 0], [-1, 0], [0, 1], [0, -1]].every(([dx, dz]) => {
+                const neighborKey = `${x + dx},${z + dz}`;
                 return chunks[neighborKey] && chunkStates[neighborKey] === CHUNK_LOADED;
             });
     
@@ -825,7 +831,7 @@ function processChunkQueue() {
         profiler.startTimer('meshGeneration');
         const chunkData = chunks[chunkKey];
         const clonedChunkData = new Int8Array(chunkData).buffer;
-
+    
         const adjacentChunks = {};
         [[1, 0], [-1, 0], [0, 1], [0, -1]].forEach(([dx, dz]) => {
             const adjChunkX = x + dx;
@@ -836,11 +842,16 @@ function processChunkQueue() {
                 adjacentChunks[adjKey] = adjClone;
             }
         });
-
+    
         const transferList = [clonedChunkData];
         Object.values(adjacentChunks).forEach(buffer => transferList.push(buffer));
-
-        geometryWorker.postMessage({
+    
+        // Select the next worker in the pool
+        const worker = geometryWorkers[currentGeometryWorkerIndex];
+        currentGeometryWorkerIndex = (currentGeometryWorkerIndex + 1) % geometryWorkers.length;
+    
+        // Send the chunk data to the selected worker
+        worker.postMessage({
             type: 'process_chunk',
             chunkX: x,
             chunkZ: z,
@@ -848,6 +859,9 @@ function processChunkQueue() {
             adjacentChunks,
             isInitialGeneration: false
         }, transferList);
+    
+        // Remove the chunk from the remesh queue
+        remeshQueue.delete(chunkKey);
     });
     remeshQueue.clear();
 
@@ -1832,7 +1846,6 @@ function generateGeometry(chunkX, chunkZ, chunkData, adjacentChunks) {
         }
     }
 
-    console.log("[Geometry Worker] Geometry Generated");
 
     return {
         chunkX,
