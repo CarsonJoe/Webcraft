@@ -12,6 +12,10 @@ const BIOME_TYPES = {
     BARREN: 4
 };
 
+const FLOWER_SPACING = 5; // Minimum blocks between flowers
+const COLOR_REGION_SIZE = 32; // Blocks per color region
+const LEAF_SPACING = 2; // More dense than flowers
+
 // Create a seedable random generator
 function createPRNG(seed) {
     return function () {
@@ -95,7 +99,7 @@ function generateChunk(chunkX, chunkZ) {
             const worldZ = chunkZ * CHUNK_SIZE + z;
 
             // Get noise values from initialized generators
-            const baseHeight = (simplex.noise2D(worldX * 0.0025, worldZ * 0.0025) + 1) * 0.8;
+            const baseHeight = (simplex.noise2D(worldX * 0.00025, worldZ * 0.00025) + 1) * 0.8;
             const detailHeight = (simplex.noise2D(worldX * 0.01, worldZ * 0.01) + 1) * 0.5;
             const height = Math.floor(0.8 * (baseHeight * 0.8 + detailHeight * 0.2) * (CHUNK_HEIGHT - WATER_LEVEL));
 
@@ -135,7 +139,118 @@ function generateChunk(chunkX, chunkZ) {
 
                 chunk[x + z * CHUNK_SIZE + y * CHUNK_SIZE * CHUNK_SIZE] = blockType;
             }
+
+            //flower placement
+            const surfaceY = height - 1;
+            if (surfaceY >= 0) {
+                const surfaceIndex = x + z * CHUNK_SIZE + surfaceY * CHUNK_SIZE * CHUNK_SIZE;
+                const surfaceBlock = chunk[surfaceIndex];
+
+                if (surfaceBlock === 1) { // Grass
+                    const biome = getBiomeAt(worldX, worldZ);
+                    if (biome === BIOME_TYPES.PLAINS || biome === BIOME_TYPES.ROCKY) {
+                        // Check spacing grid
+                        const gridX = Math.floor(worldX / FLOWER_SPACING);
+                        const gridZ = Math.floor(worldZ / FLOWER_SPACING);
+                        const spacingSeed = gridX * 12345 + gridZ;
+                        const spacingRNG = createPRNG(spacingSeed);
+
+                        // Get color for this region
+                        const colorRegionX = Math.floor(worldX / COLOR_REGION_SIZE);
+                        const colorRegionZ = Math.floor(worldZ / COLOR_REGION_SIZE);
+                        const colorSeed = colorRegionX * 54321 + colorRegionZ;
+                        const colorRNG = createPRNG(colorSeed);
+                        const colorIndex = Math.floor(colorRNG() * 3);
+
+                        // Placement probability with noise
+                        const placementNoise = simplex.noise2D(
+                            worldX * 0.2,
+                            worldZ * 0.2
+                        );
+
+                        // Only place if:
+                        // 1. Within spacing grid cell's random position
+                        // 2. Noise threshold is met
+                        // 3. No adjacent flowers
+                        if (placementNoise > 0.7 &&
+                            spacingRNG() < 0.3 &&
+                            !hasAdjacentFlowers(chunk, x, surfaceY + 1, z)) {
+
+                            const flowerY = surfaceY + 1;
+                            if (flowerY < CHUNK_HEIGHT) {
+                                const flowerType = 10 + colorIndex;
+                                const flowerIndex = x + z * CHUNK_SIZE + flowerY * CHUNK_SIZE * CHUNK_SIZE;
+                                chunk[flowerIndex] = flowerType;
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Leaf/Grass placement (same structure as flowers)
+            const leafSurfaceY = height - 1;
+            if (leafSurfaceY >= 0) {
+                const leafSurfaceIndex = x + z * CHUNK_SIZE + leafSurfaceY * CHUNK_SIZE * CHUNK_SIZE;
+                const leafSurfaceBlock = chunk[leafSurfaceIndex];
+
+                if (leafSurfaceBlock === 1) { // Grass
+                    const biome = getBiomeAt(worldX, worldZ);
+                    if (biome !== BIOME_TYPES.BARREN) { // Appears in more biomes
+
+                        // Leaf spacing grid
+                        const leafGridX = Math.floor(worldX / LEAF_SPACING);
+                        const leafGridZ = Math.floor(worldZ / LEAF_SPACING);
+                        const leafSpacingSeed = leafGridX * 67890 + leafGridZ;
+                        const leafSpacingRNG = createPRNG(leafSpacingSeed);
+
+                        // Placement probability with noise
+                        const leafNoise = simplex.noise2D(worldX * 0.15, worldZ * 0.15);
+
+                        if (leafNoise > 0.5 && // Lower threshold than flowers
+                            leafSpacingRNG() < 0.6 && // Higher density
+                            !hasAdjacentLeaves(chunk, x, leafSurfaceY + 1, z)) {
+
+                            const foliageY = leafSurfaceY + 1;
+                            if (foliageY < CHUNK_HEIGHT) {
+                                chunk[x + z * CHUNK_SIZE + foliageY * CHUNK_SIZE * CHUNK_SIZE] = 13; // Leaf block
+                            }
+                        }
+                    }
+                }
+            }
         }
+    }
+
+    // Add this helper function near hasAdjacentFlowers
+    function hasAdjacentLeaves(chunk, x, y, z) {
+        const offsets = [
+            [-1, 0], [1, 0], [0, -1], [0, 1]
+        ];
+
+        return offsets.some(([dx, dz]) => {
+            const checkX = x + dx;
+            const checkZ = z + dz;
+            if (checkX < 0 || checkX >= CHUNK_SIZE || checkZ < 0 || checkZ >= CHUNK_SIZE) return false;
+
+            const index = checkX + checkZ * CHUNK_SIZE + y * CHUNK_SIZE * CHUNK_SIZE;
+            return chunk[index] === 7; // Check for leaves
+        });
+    }
+
+    function hasAdjacentFlowers(chunk, x, y, z) {
+        const offsets = [
+            [-1, 0], [1, 0], [0, -1], [0, 1],
+            [-1, -1], [-1, 1], [1, -1], [1, 1]
+        ];
+
+        return offsets.some(([dx, dz]) => {
+            const checkX = x + dx;
+            const checkZ = z + dz;
+            if (checkX < 0 || checkX >= CHUNK_SIZE || checkZ < 0 || checkZ >= CHUNK_SIZE) return false;
+
+            const index = checkX + checkZ * CHUNK_SIZE + y * CHUNK_SIZE * CHUNK_SIZE;
+            return chunk[index] >= 10 && chunk[index] <= 12;
+        });
     }
 
     const chunkFeatures = [];
@@ -270,7 +385,7 @@ function generateLargeTree(chunk, chunkX, chunkZ, worldX, worldZ, baseHeight, sc
         const radiusSq = radius * radius;
         const dxMin = Math.max(-radius, chunkStartX - worldX);
         const dxMax = Math.min(radius, chunkEndX - worldX);
-        
+
         for (let dx = dxMin; dx <= dxMax; dx++) {
             const xSq = dx * dx;
             if (xSq > radiusSq) continue;
@@ -278,7 +393,7 @@ function generateLargeTree(chunk, chunkX, chunkZ, worldX, worldZ, baseHeight, sc
             const zMax = Math.sqrt(radiusSq - xSq);
             const dzMin = Math.max(-Math.floor(zMax), chunkStartZ - worldZ);
             const dzMax = Math.min(Math.floor(zMax), chunkEndZ - worldZ);
-            
+
             for (let dz = dzMin; dz <= dzMax; dz++) {
                 if (xSq + dz * dz > radiusSq) continue;
                 setBlockIfInChunk(
@@ -432,7 +547,7 @@ function getBlockInChunk(chunk, x, y, z) {
 }
 
 function getHeightAtWorld(worldX, worldZ) {
-    const baseHeight = (simplex.noise2D(worldX * 0.0025, worldZ * 0.0025) + 1) * 0.8;
+    const baseHeight = (simplex.noise2D(worldX * 0.00025, worldZ * 0.00025) + 1) * 0.8;
     const detailHeight = (simplex.noise2D(worldX * 0.01, worldZ * 0.01) + 1) * 0.5;
     return Math.floor(0.8 * (baseHeight * 0.8 + detailHeight * 0.2) * (CHUNK_HEIGHT - WATER_LEVEL));
 }

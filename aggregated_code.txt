@@ -8,7 +8,7 @@ export const CHUNK_SIZE = 18;
 export const CHUNK_HEIGHT = 120;
 export const WATER_LEVEL = 24;
 export const BEACH_LEVEL = WATER_LEVEL + 2;
-export const RENDER_DISTANCE = 15;
+export const RENDER_DISTANCE = 20;
 
 ================================================================================
 File: ./scripts/main.js
@@ -16,9 +16,10 @@ File: ./scripts/main.js
 
 import Player from './player.js';
 import { CHUNK_HEIGHT } from './constants.js';
-import { updateChunks, setBlock, getBlock, waterMaterial } from './world.js';
+import { updateChunks, setBlock, getBlock } from './world.js';
 import { initWorld, notifySceneReady, initializationComplete } from './world.js';
 import { createSkybox, initRenderer, render, chunkMeshes } from './renderer.js';
+import { UIManager } from './uiManager.js';
 
 // Set up the scene, camera, and renderer
 const scene = new THREE.Scene();
@@ -217,7 +218,11 @@ function updateCloudPosition() {
     clouds.position.z = playerPos.z;
 }
 
-// Initialize the player
+
+// Initialize UI first
+UIManager.init();
+
+// Then initialize player
 Player.init(camera, scene);
 
 
@@ -259,7 +264,7 @@ function animate(timestamp) {
     updateCloudPosition();
     render(scene, camera);
     profiler.endFrame();
-    updateDebugUI();
+    // updateDebugUI();
 }
 
 animate();
@@ -348,31 +353,36 @@ const materials = {
     1: { color: 0x6cc66c }, // Grass
     2: { color: 0x997260 }, // Dirt
     3: { color: 0x888888 }, // Stone
-    4: { color: 0xe3dda6 }, // Sand
-    5: { color: 0x6380ec }, // Water
+    4: { color: 0xfaf5b6 }, // Sand
+    5: { color: 0x2e4394 }, // Water
     6: { color: 0x7b6e65 }, // Wood
-    7: { color: 0x1f541f }, // Leaves
+    7: { color: 0x163b16 }, // Leaves
     8: { color: 0x3b4044 }, // Slate
-    9: { color: 0xFFFFFF }  // Limestone
+    9: { color: 0xFFFFFF },  // Limestone
+    10: { color: 0x701f16 }, // Red flower
+    11: { color: 0xb58b3f }, // Orange flower
+    12: { color: 0x755e6f }, // White flower
+    13: { color: 0x366636 }, // Leaves
 };
 
 const solidMaterial = new THREE.MeshLambertMaterial({ vertexColors: true });
 export const waterMaterial = new THREE.ShaderMaterial({
-    uniforms: {
-        time: { value: 0 },
-        waterColor: { value: new THREE.Color(0x6fbffc) },
-        lightDirection: { value: new THREE.Vector3(1, 1, 1).normalize() },
-        waveScale: { value: .2 },
-        fogColor: { value: new THREE.Color(0x619dde) },
-        fogNear: { value: 20 },
-        fogFar: { value: 300 },
-        cameraPos: { value: new THREE.Vector3() }, // Added camera position
-        reflectionIntensity: { value: 0.2 } // New uniform for reflection control
-    },
+    uniforms: THREE.UniformsUtils.merge([
+        THREE.UniformsLib.fog, // Include fog uniforms
+        {
+            time: { value: 0 },
+            waterColor: { value: new THREE.Color(0x5782e6) },
+            lightDirection: { value: new THREE.Vector3(1, 1, 1).normalize() },
+            waveScale: { value: .2 },
+            cameraPos: { value: new THREE.Vector3() },
+            reflectionIntensity: { value: 0.2 }
+        }
+    ]),
     vertexShader: `
         varying vec3 vNormal;
         varying vec3 vWorldPosition;
         varying float vDisplacement;
+        varying float vFogDepth; // For fog calculation
         uniform float time;
         uniform float waveScale;
 
@@ -452,88 +462,75 @@ export const waterMaterial = new THREE.ShaderMaterial({
             float worldX = baseWorldPosition.x;
             float worldZ = baseWorldPosition.z;
             
-            // Large waves (unchanged)
+            // Displacement calculations (unchanged)
             float displacement = noise(vec3(worldX * 0.3, worldZ * 0.3, time * 0.1)) * waveScale;
             displacement += sin(worldX * 0.5 + time) * 0.2 * waveScale;
-            
-            // Smaller wave ripples
-            float rippleFrequency = 10.0; // Higher frequency for tighter ripples in x and z
-            float rippleAmplitude = 0.2; // Larger amplitude for taller ripples in y
-            displacement += noise(vec3(worldX * rippleFrequency, worldZ * rippleFrequency, time * 1.0)) * rippleAmplitude;
-            displacement += sin(worldX * rippleFrequency + time * .1) * 0.1 * rippleAmplitude;
-            
+            displacement += noise(vec3(worldX * 10.0, worldZ * 10.0, time * 1.0)) * 0.2;
+            displacement += sin(worldX * 10.0 + time * .1) * 0.1 * 0.2;
             displacement = clamp(displacement, -0.5, 0.5);
             
-            vDisplacement = displacement; // Pass displacement to fragment shader
+            vDisplacement = displacement;
             
             vec3 pos = position;
             pos.y += displacement;
-            vec4 displacedWorldPosition = modelMatrix * vec4(pos, 1.0);
-            vWorldPosition = displacedWorldPosition.xyz;
+            
+            // Calculate view-space position for fog
+            vec4 mvPosition = modelViewMatrix * vec4(pos, 1.0);
+            vFogDepth = -mvPosition.z; // View-space depth
+            
+            vWorldPosition = (modelMatrix * vec4(pos, 1.0)).xyz;
 
-            // Simplified normal calculation (unchanged)
+            // Normal calculation (unchanged)
             float eps = 0.1;
             float dx = noise(vec3((worldX + eps) * 0.3, worldZ * 0.3, time * 0.5)) - 
-                    noise(vec3((worldX - eps) * 0.3, worldZ * 0.3, time * 0.5));
+                      noise(vec3((worldX - eps) * 0.3, worldZ * 0.3, time * 0.5));
             float dz = noise(vec3(worldX * 0.3, (worldZ + eps) * 0.3, time * 0.5)) - 
-                    noise(vec3(worldX * 0.3, (worldZ - eps) * 0.3, time * 0.5));
+                      noise(vec3(worldX * 0.3, (worldZ - eps) * 0.3, time * 0.5));
             
             vNormal = normalize(vec3(-dx * 2.0, 1.0, -dz * 2.0));
-            gl_Position = projectionMatrix * modelViewMatrix * vec4(pos, 1.0);
+            gl_Position = projectionMatrix * mvPosition;
         }
     `,
     fragmentShader: `
-    varying vec3 vNormal;
-    varying vec3 vWorldPosition;
-    varying float vDisplacement;
-    uniform vec3 waterColor;
-    uniform vec3 lightDirection;
     uniform vec3 fogColor;
     uniform float fogNear;
     uniform float fogFar;
-    uniform vec3 cameraPos; // Camera position uniform
+    uniform vec3 waterColor;
+    uniform vec3 lightDirection;
+    uniform vec3 cameraPos;
     uniform float reflectionIntensity;
+    
+    varying vec3 vNormal;
+    varying vec3 vWorldPosition;
+    varying float vDisplacement;
+    varying float vFogDepth; // Received from vertex shader
 
     void main() {
         vec3 normal = normalize(vNormal);
         vec3 lightDir = normalize(lightDirection);
-        vec3 viewDir = normalize(cameraPos - vWorldPosition); // Calculate view direction
+        vec3 viewDir = normalize(cameraPos - vWorldPosition);
 
-        // Fresnel effect calculation
+        // Fresnel effect (unchanged)
         float fresnel = pow(clamp(1.0 - dot(normal, viewDir), 0.0, 1.0), 5.0);
-        fresnel *= reflectionIntensity; // Control reflection strength
+        fresnel *= reflectionIntensity;
 
-        // Base color gradient from displacement
+        // Color calculations (unchanged)
         float gradientFactor = smoothstep(-0.9, 0.9, vDisplacement);
-        vec3 darkColor = waterColor * 0.95;
-        vec3 lightColor = waterColor * 1.05;
-        vec3 baseColor = mix(darkColor, lightColor, gradientFactor);
+        vec3 baseColor = mix(waterColor * 0.95, waterColor * 1.05, gradientFactor);
+        vec3 specularColor = vec3(1.0) * pow(max(dot(normal, normalize(lightDir + viewDir)), 0.0), 128.0) * fresnel;
+        vec3 finalColor = mix(baseColor, mix(baseColor, vec3(1.0), fresnel), fresnel) * max(dot(normal, lightDir), 0.2) + specularColor;
 
-        // Specular highlights (Blinn-Phong model)
-        vec3 halfDir = normalize(lightDir + viewDir);
-        float specular = pow(max(dot(normal, halfDir), 0.0), 128.0);
-        vec3 specularColor = vec3(1.0) * specular * fresnel;
-
-        // Combine colors with Fresnel effect
-        vec3 reflectionColor = mix(baseColor, vec3(1.0), fresnel);
-        vec3 finalColor = mix(baseColor, reflectionColor, fresnel) * 
-                        max(dot(normal, lightDir), 0.2) + 
-                        specularColor;
-
-        // Apply fog
-        float depth = distance(vWorldPosition, cameraPos);
-        float fogFactor = smoothstep(fogNear, fogFar, depth);
+        // Apply fog using view-space depth
+        float fogFactor = smoothstep(fogNear, fogFar, vFogDepth);
         finalColor = mix(finalColor, fogColor, fogFactor);
 
-        // Alpha based on displacement
-        float alpha = 0.8 + 0.2 * abs(vDisplacement);
-
-        gl_FragColor = vec4(finalColor, alpha);
+        gl_FragColor = vec4(finalColor, 0.8 + 0.2 * abs(vDisplacement));
     }
 `,
     transparent: true,
     side: THREE.DoubleSide,
-    depthWrite: false
+    depthWrite: false,
+    fog: true // Enable fog updates from the scene
 });
 
 
@@ -1157,6 +1154,10 @@ const BIOME_TYPES = {
     BARREN: 4
 };
 
+const FLOWER_SPACING = 5; // Minimum blocks between flowers
+const COLOR_REGION_SIZE = 32; // Blocks per color region
+const LEAF_SPACING = 2; // More dense than flowers
+
 // Create a seedable random generator
 function createPRNG(seed) {
     return function () {
@@ -1240,7 +1241,7 @@ function generateChunk(chunkX, chunkZ) {
             const worldZ = chunkZ * CHUNK_SIZE + z;
 
             // Get noise values from initialized generators
-            const baseHeight = (simplex.noise2D(worldX * 0.0025, worldZ * 0.0025) + 1) * 0.8;
+            const baseHeight = (simplex.noise2D(worldX * 0.00025, worldZ * 0.00025) + 1) * 0.8;
             const detailHeight = (simplex.noise2D(worldX * 0.01, worldZ * 0.01) + 1) * 0.5;
             const height = Math.floor(0.8 * (baseHeight * 0.8 + detailHeight * 0.2) * (CHUNK_HEIGHT - WATER_LEVEL));
 
@@ -1280,7 +1281,118 @@ function generateChunk(chunkX, chunkZ) {
 
                 chunk[x + z * CHUNK_SIZE + y * CHUNK_SIZE * CHUNK_SIZE] = blockType;
             }
+
+            //flower placement
+            const surfaceY = height - 1;
+            if (surfaceY >= 0) {
+                const surfaceIndex = x + z * CHUNK_SIZE + surfaceY * CHUNK_SIZE * CHUNK_SIZE;
+                const surfaceBlock = chunk[surfaceIndex];
+
+                if (surfaceBlock === 1) { // Grass
+                    const biome = getBiomeAt(worldX, worldZ);
+                    if (biome === BIOME_TYPES.PLAINS || biome === BIOME_TYPES.ROCKY) {
+                        // Check spacing grid
+                        const gridX = Math.floor(worldX / FLOWER_SPACING);
+                        const gridZ = Math.floor(worldZ / FLOWER_SPACING);
+                        const spacingSeed = gridX * 12345 + gridZ;
+                        const spacingRNG = createPRNG(spacingSeed);
+
+                        // Get color for this region
+                        const colorRegionX = Math.floor(worldX / COLOR_REGION_SIZE);
+                        const colorRegionZ = Math.floor(worldZ / COLOR_REGION_SIZE);
+                        const colorSeed = colorRegionX * 54321 + colorRegionZ;
+                        const colorRNG = createPRNG(colorSeed);
+                        const colorIndex = Math.floor(colorRNG() * 3);
+
+                        // Placement probability with noise
+                        const placementNoise = simplex.noise2D(
+                            worldX * 0.2,
+                            worldZ * 0.2
+                        );
+
+                        // Only place if:
+                        // 1. Within spacing grid cell's random position
+                        // 2. Noise threshold is met
+                        // 3. No adjacent flowers
+                        if (placementNoise > 0.7 &&
+                            spacingRNG() < 0.3 &&
+                            !hasAdjacentFlowers(chunk, x, surfaceY + 1, z)) {
+
+                            const flowerY = surfaceY + 1;
+                            if (flowerY < CHUNK_HEIGHT) {
+                                const flowerType = 10 + colorIndex;
+                                const flowerIndex = x + z * CHUNK_SIZE + flowerY * CHUNK_SIZE * CHUNK_SIZE;
+                                chunk[flowerIndex] = flowerType;
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Leaf/Grass placement (same structure as flowers)
+            const leafSurfaceY = height - 1;
+            if (leafSurfaceY >= 0) {
+                const leafSurfaceIndex = x + z * CHUNK_SIZE + leafSurfaceY * CHUNK_SIZE * CHUNK_SIZE;
+                const leafSurfaceBlock = chunk[leafSurfaceIndex];
+
+                if (leafSurfaceBlock === 1) { // Grass
+                    const biome = getBiomeAt(worldX, worldZ);
+                    if (biome !== BIOME_TYPES.BARREN) { // Appears in more biomes
+
+                        // Leaf spacing grid
+                        const leafGridX = Math.floor(worldX / LEAF_SPACING);
+                        const leafGridZ = Math.floor(worldZ / LEAF_SPACING);
+                        const leafSpacingSeed = leafGridX * 67890 + leafGridZ;
+                        const leafSpacingRNG = createPRNG(leafSpacingSeed);
+
+                        // Placement probability with noise
+                        const leafNoise = simplex.noise2D(worldX * 0.15, worldZ * 0.15);
+
+                        if (leafNoise > 0.5 && // Lower threshold than flowers
+                            leafSpacingRNG() < 0.6 && // Higher density
+                            !hasAdjacentLeaves(chunk, x, leafSurfaceY + 1, z)) {
+
+                            const foliageY = leafSurfaceY + 1;
+                            if (foliageY < CHUNK_HEIGHT) {
+                                chunk[x + z * CHUNK_SIZE + foliageY * CHUNK_SIZE * CHUNK_SIZE] = 13; // Leaf block
+                            }
+                        }
+                    }
+                }
+            }
         }
+    }
+
+    // Add this helper function near hasAdjacentFlowers
+    function hasAdjacentLeaves(chunk, x, y, z) {
+        const offsets = [
+            [-1, 0], [1, 0], [0, -1], [0, 1]
+        ];
+
+        return offsets.some(([dx, dz]) => {
+            const checkX = x + dx;
+            const checkZ = z + dz;
+            if (checkX < 0 || checkX >= CHUNK_SIZE || checkZ < 0 || checkZ >= CHUNK_SIZE) return false;
+
+            const index = checkX + checkZ * CHUNK_SIZE + y * CHUNK_SIZE * CHUNK_SIZE;
+            return chunk[index] === 7; // Check for leaves
+        });
+    }
+
+    function hasAdjacentFlowers(chunk, x, y, z) {
+        const offsets = [
+            [-1, 0], [1, 0], [0, -1], [0, 1],
+            [-1, -1], [-1, 1], [1, -1], [1, 1]
+        ];
+
+        return offsets.some(([dx, dz]) => {
+            const checkX = x + dx;
+            const checkZ = z + dz;
+            if (checkX < 0 || checkX >= CHUNK_SIZE || checkZ < 0 || checkZ >= CHUNK_SIZE) return false;
+
+            const index = checkX + checkZ * CHUNK_SIZE + y * CHUNK_SIZE * CHUNK_SIZE;
+            return chunk[index] >= 10 && chunk[index] <= 12;
+        });
     }
 
     const chunkFeatures = [];
@@ -1385,11 +1497,9 @@ function generateChunkFeatures(chunkX, chunkZ) {
     return features;
 }
 
-const TREE_SCALE = 1; // Adjust this value to scale tree size
-
 function generateLargeTree(chunk, chunkX, chunkZ, worldX, worldZ, baseHeight, scale = 1.5) {
     // Calculate scaled tree dimensions
-    const unscaledHeight = Math.floor(Math.random() * 10) + 15;
+    const unscaledHeight = Math.floor(Math.random() * 20) + 15;
     const treeHeight = Math.max(1, Math.floor(unscaledHeight * scale));
     const trunkHeight = Math.floor(treeHeight * 0.7);
     const leafRadius = Math.floor(treeHeight * 0.4) + Math.floor(2 * scale);
@@ -1417,7 +1527,7 @@ function generateLargeTree(chunk, chunkX, chunkZ, worldX, worldZ, baseHeight, sc
         const radiusSq = radius * radius;
         const dxMin = Math.max(-radius, chunkStartX - worldX);
         const dxMax = Math.min(radius, chunkEndX - worldX);
-        
+
         for (let dx = dxMin; dx <= dxMax; dx++) {
             const xSq = dx * dx;
             if (xSq > radiusSq) continue;
@@ -1425,7 +1535,7 @@ function generateLargeTree(chunk, chunkX, chunkZ, worldX, worldZ, baseHeight, sc
             const zMax = Math.sqrt(radiusSq - xSq);
             const dzMin = Math.max(-Math.floor(zMax), chunkStartZ - worldZ);
             const dzMax = Math.min(Math.floor(zMax), chunkEndZ - worldZ);
-            
+
             for (let dz = dzMin; dz <= dzMax; dz++) {
                 if (xSq + dz * dz > radiusSq) continue;
                 setBlockIfInChunk(
@@ -1579,7 +1689,7 @@ function getBlockInChunk(chunk, x, y, z) {
 }
 
 function getHeightAtWorld(worldX, worldZ) {
-    const baseHeight = (simplex.noise2D(worldX * 0.0025, worldZ * 0.0025) + 1) * 0.8;
+    const baseHeight = (simplex.noise2D(worldX * 0.00025, worldZ * 0.00025) + 1) * 0.8;
     const detailHeight = (simplex.noise2D(worldX * 0.01, worldZ * 0.01) + 1) * 0.5;
     return Math.floor(0.8 * (baseHeight * 0.8 + detailHeight * 0.2) * (CHUNK_HEIGHT - WATER_LEVEL));
 }
@@ -1689,10 +1799,25 @@ const VARIATION_CONFIG = {
         intensity: 0.15,
         channelBias: [0.9, 0.95, 1.1]
     },
-    9: { // Limestone
-        scale: .4,
-        intensity: 0.12,
-        channelBias: [1.0, 1.0, 1.0]
+    9: { // Red Flower
+        scale: 0.15,
+        intensity: 0.15,
+        channelBias: [1.3, 0.7, 0.7]
+    },
+    10: { // Orange Flower
+        scale: .1,
+        intensity: 0.2,
+        channelBias: [0.8, 1.2, 0.7]
+    },
+    11: { // White Flower
+        scale: .1,
+        intensity: 0.2,
+        channelBias: [0.8, 1.2, 0.7]
+    },
+    12: { // Grass Foliage
+        scale: 0.1,      // Match leaf frequency
+        intensity: 0.5,
+        channelBias: [0.7, 1.4, 0.6]  // Strong green variations
     }
 };
 
@@ -1746,7 +1871,7 @@ function generateGeometry(chunkX, chunkZ, chunkData, adjacentChunks) {
     const leaves = { positions: [], offsets: [], colors: [], indices: [] };
 
     // Moved addFace inside generateGeometry and added AO calculations
-    const addFace = (isWater, normal, localX, localY, localZ, color, isLeaf = false) => {
+    const addFace = (isWater, normal, localX, localY, localZ, color, isFoliage = false) => {
         const target = isWater ? water : solid;
 
         // Vertex positions in world coordinates
@@ -1875,7 +2000,7 @@ function generateGeometry(chunkX, chunkZ, chunkData, adjacentChunks) {
 
                 // Skip processing completely enclosed solid blocks
                 if (x > 0 && x < CHUNK_SIZE - 1 &&
-                    z > 0 && z < CHUNK_SIZE - 1 && 
+                    z > 0 && z < CHUNK_SIZE - 1 &&
                     y > 0 && y < CHUNK_HEIGHT - 1) {
                     if (!isTransparent(neighbors.px) &&
                         !isTransparent(neighbors.nx) &&
@@ -1889,7 +2014,7 @@ function generateGeometry(chunkX, chunkZ, chunkData, adjacentChunks) {
 
 
                 const isWater = blockType === 5;
-                const isLeaf = blockType === 7;
+                const isFoliage = (blockType === 7 || blockType === 10 || blockType === 11 || blockType === 12 || blockType === 13);
                 const baseColor = hexToRGB(materials[blockType].color);
                 const colorMultipliers = getBlockVariation(
                     chunkX * CHUNK_SIZE + x,
@@ -1899,7 +2024,7 @@ function generateGeometry(chunkX, chunkZ, chunkData, adjacentChunks) {
                 );
                 const finalColor = baseColor.map((c, i) => Math.min(1, Math.max(0, c * colorMultipliers[i])));
 
-                if (isLeaf) {
+                if (isFoliage) {
                     const cx = x + 0.5;
                     const cy = y + 0.5;
                     const cz = z + 0.5;
@@ -2016,7 +2141,7 @@ function getBlock(chunkData, x, y, z) {
 }
 
 function isTransparent(blockType) {
-    return blockType === 0 || blockType === 5 || blockType === 7;
+    return blockType === 0 || blockType === 5 || blockType === 7 || (blockType >= 10 && blockType <= 13);
 }
 
 export default self;

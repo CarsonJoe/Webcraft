@@ -1,3 +1,5 @@
+import { RENDER_DISTANCE } from "./constants.js";
+
 let renderer, camera;
 export let scene = new THREE.Scene(); 
 export const chunkMeshes = {};
@@ -21,7 +23,7 @@ export function initRenderer(scn, cam) {
     renderer.setSize(window.innerWidth, window.innerHeight);
     document.body.appendChild(renderer.domElement);
     
-    scene.fog = new THREE.Fog(0x619dde, 20, 300);  // Sky blue color, start fading at 20 units, fully faded at 500 units
+    scene.fog = new THREE.Fog(0x619dde, (RENDER_DISTANCE / 24 * 100), (RENDER_DISTANCE / 4 * 100));  // Sky blue color, start fading at 20 units, fully faded at 500 units
 
     createFPSCounter();
 

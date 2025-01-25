@@ -78,15 +78,35 @@ const VARIATION_CONFIG = {
         intensity: 0.2,
         channelBias: [0.8, 1.2, 0.7]
     },
-    8: { // Slate
+    8: { // Limestone
         scale: .3,
         intensity: 0.15,
         channelBias: [0.9, 0.95, 1.1]
     },
-    9: { // Limestone
-        scale: .4,
-        intensity: 0.12,
-        channelBias: [1.0, 1.0, 1.0]
+    9: { // Slate
+        scale: .3,
+        intensity: 0.15,
+        channelBias: [0.9, 0.95, 1.1]
+    },
+    10: { // Red Flower
+        scale: 0.15,
+        intensity: 0.15,
+        channelBias: [1.3, 0.7, 0.7]
+    },
+    11: { // Orange Flower
+        scale: .1,
+        intensity: 0.2,
+        channelBias: [0.8, 1.2, 0.7]
+    },
+    12: { // White Flower
+        scale: .1,
+        intensity: 0.2,
+        channelBias: [0.8, 1.2, 0.7]
+    },
+    13: { // Grass Foliage
+        scale: 0.1,
+        intensity: 0.2,
+        channelBias: [0.8, 1.2, 0.7]  // Strong green variations
     }
 };
 
@@ -140,7 +160,7 @@ function generateGeometry(chunkX, chunkZ, chunkData, adjacentChunks) {
     const leaves = { positions: [], offsets: [], colors: [], indices: [] };
 
     // Moved addFace inside generateGeometry and added AO calculations
-    const addFace = (isWater, normal, localX, localY, localZ, color, isLeaf = false) => {
+    const addFace = (isWater, normal, localX, localY, localZ, color, isFoliage = false) => {
         const target = isWater ? water : solid;
 
         // Vertex positions in world coordinates
@@ -269,7 +289,7 @@ function generateGeometry(chunkX, chunkZ, chunkData, adjacentChunks) {
 
                 // Skip processing completely enclosed solid blocks
                 if (x > 0 && x < CHUNK_SIZE - 1 &&
-                    z > 0 && z < CHUNK_SIZE - 1 && 
+                    z > 0 && z < CHUNK_SIZE - 1 &&
                     y > 0 && y < CHUNK_HEIGHT - 1) {
                     if (!isTransparent(neighbors.px) &&
                         !isTransparent(neighbors.nx) &&
@@ -283,7 +303,7 @@ function generateGeometry(chunkX, chunkZ, chunkData, adjacentChunks) {
 
 
                 const isWater = blockType === 5;
-                const isLeaf = blockType === 7;
+                const isFoliage = (blockType === 7 || blockType === 10 || blockType === 11 || blockType === 12 || blockType === 13);
                 const baseColor = hexToRGB(materials[blockType].color);
                 const colorMultipliers = getBlockVariation(
                     chunkX * CHUNK_SIZE + x,
@@ -293,7 +313,7 @@ function generateGeometry(chunkX, chunkZ, chunkData, adjacentChunks) {
                 );
                 const finalColor = baseColor.map((c, i) => Math.min(1, Math.max(0, c * colorMultipliers[i])));
 
-                if (isLeaf) {
+                if (isFoliage) {
                     const cx = x + 0.5;
                     const cy = y + 0.5;
                     const cz = z + 0.5;
@@ -410,7 +430,7 @@ function getBlock(chunkData, x, y, z) {
 }
 
 function isTransparent(blockType) {
-    return blockType === 0 || blockType === 5 || blockType === 7;
+    return blockType === 0 || blockType === 5 || blockType === 7 || (blockType >= 10 && blockType <= 13);
 }
 
 export default self;

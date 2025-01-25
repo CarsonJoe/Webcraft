@@ -39,17 +39,17 @@ const Player = (function () {
     function init(cam, scene) {
         // Get canvas from UIManager instead of querying directly
         const canvas = UIManager.getCanvas();
-    
+
         camera = cam;
         pitchObject = new THREE.Object3D();
         pitchObject.position.y = EYE_HEIGHT;
         pitchObject.add(camera);
-    
+
         yawObject = new THREE.Object3D();
         yawObject.position.set(spawnPoint.x, CHUNK_HEIGHT, spawnPoint.z);
         yawObject.add(pitchObject);
         scene.add(yawObject);
-    
+
         raycaster = new THREE.Raycaster();
         setupEventListeners();
     }
@@ -227,14 +227,15 @@ const Player = (function () {
             }
             yawObject.position.y += velocity.y * deltaTime;
 
-            // Check if the player is in leaves
-            const isInLeaves = checkInLeaves();
+            // Check the number of intersecting leaf blocks
+            const leafCount = checkInLeaves();
 
-            // Adjust movement speed based on whether the player is in leaves
+            // Adjust movement speed based on how many leaves are intersected
             let currentSpeed = isSwimming ? SWIM_SPEED : (isSprinting ? SPRINT_SPEED : NORMAL_SPEED);
-            if (isInLeaves) {
-                currentSpeed *= 0.5; // Reduce speed by 50% when in leaves
-            }
+
+            // Each leaf reduces speed by 5% (up to 50% reduction)
+            const speedMultiplier = 1 - Math.min(leafCount * 0.05, 0.5);
+            currentSpeed *= speedMultiplier;
 
             // Horizontal movement and collision detection with auto-jump
             const movement = direction.multiplyScalar(currentSpeed * deltaTime);
@@ -306,7 +307,7 @@ const Player = (function () {
             for (let bz = startZ; bz <= endZ; bz++) {
                 for (let by = startY; by <= endY; by++) {
                     const blockType = getBlockGlobal(bx, by, bz);
-                    if (blockType !== 0 && blockType !== 5 && blockType !== 7) {
+                    if (blockType !== 0 && blockType !== 5 && blockType !== 7 && blockType !== 10 && blockType !== 11 && blockType !== 12 && blockType !== 13) {
                         return true; // Collision detected
                     }
                 }
@@ -329,17 +330,20 @@ const Player = (function () {
         const minZ = pos.z - HALF_WIDTH;
         const maxZ = pos.z + HALF_WIDTH;
 
+        let leafCount = 0;
+
         for (let x = Math.floor(minX); x <= Math.floor(maxX); x++) {
             for (let y = Math.floor(minY); y <= Math.floor(maxY); y++) {
                 for (let z = Math.floor(minZ); z <= Math.floor(maxZ); z++) {
                     const blockType = getBlockGlobal(x, y, z);
                     if (blockType === 7) { // Leaves are block type 7
-                        return true;
+                        leafCount++;
                     }
                 }
             }
         }
-        return false;
+
+        return leafCount;
     }
 
     function getPosition() {

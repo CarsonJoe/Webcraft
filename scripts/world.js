@@ -39,31 +39,36 @@ const materials = {
     1: { color: 0x6cc66c }, // Grass
     2: { color: 0x997260 }, // Dirt
     3: { color: 0x888888 }, // Stone
-    4: { color: 0xe3dda6 }, // Sand
+    4: { color: 0xfaf5b6 }, // Sand
     5: { color: 0x2e4394 }, // Water
     6: { color: 0x7b6e65 }, // Wood
     7: { color: 0x163b16 }, // Leaves
     8: { color: 0x3b4044 }, // Slate
-    9: { color: 0xFFFFFF }  // Limestone
+    9: { color: 0xFFFFFF },  // Limestone
+    10: { color: 0x701f16 }, // Red flower
+    11: { color: 0xb58b3f }, // Orange flower
+    12: { color: 0x755e6f }, // White flower
+    13: { color: 0x305c30 }, // Ground Grass
 };
 
 const solidMaterial = new THREE.MeshLambertMaterial({ vertexColors: true });
 export const waterMaterial = new THREE.ShaderMaterial({
-    uniforms: {
-        time: { value: 0 },
-        waterColor: { value: new THREE.Color(0x5782e6) },
-        lightDirection: { value: new THREE.Vector3(1, 1, 1).normalize() },
-        waveScale: { value: .2 },
-        fogColor: { value: new THREE.Color(0x619dde) },
-        fogNear: { value: 20 },
-        fogFar: { value: 300 },
-        cameraPos: { value: new THREE.Vector3() }, // Added camera position
-        reflectionIntensity: { value: 0.2 } // New uniform for reflection control
-    },
+    uniforms: THREE.UniformsUtils.merge([
+        THREE.UniformsLib.fog, // Include fog uniforms
+        {
+            time: { value: 0 },
+            waterColor: { value: new THREE.Color(0x5782e6) },
+            lightDirection: { value: new THREE.Vector3(1, 1, 1).normalize() },
+            waveScale: { value: .2 },
+            cameraPos: { value: new THREE.Vector3() },
+            reflectionIntensity: { value: 0.2 }
+        }
+    ]),
     vertexShader: `
         varying vec3 vNormal;
         varying vec3 vWorldPosition;
         varying float vDisplacement;
+        varying float vFogDepth; // For fog calculation
         uniform float time;
         uniform float waveScale;
 
@@ -143,88 +148,75 @@ export const waterMaterial = new THREE.ShaderMaterial({
             float worldX = baseWorldPosition.x;
             float worldZ = baseWorldPosition.z;
             
-            // Large waves (unchanged)
+            // Displacement calculations (unchanged)
             float displacement = noise(vec3(worldX * 0.3, worldZ * 0.3, time * 0.1)) * waveScale;
             displacement += sin(worldX * 0.5 + time) * 0.2 * waveScale;
-            
-            // Smaller wave ripples
-            float rippleFrequency = 10.0; // Higher frequency for tighter ripples in x and z
-            float rippleAmplitude = 0.2; // Larger amplitude for taller ripples in y
-            displacement += noise(vec3(worldX * rippleFrequency, worldZ * rippleFrequency, time * 1.0)) * rippleAmplitude;
-            displacement += sin(worldX * rippleFrequency + time * .1) * 0.1 * rippleAmplitude;
-            
+            displacement += noise(vec3(worldX * 10.0, worldZ * 10.0, time * 1.0)) * 0.2;
+            displacement += sin(worldX * 10.0 + time * .1) * 0.1 * 0.2;
             displacement = clamp(displacement, -0.5, 0.5);
             
-            vDisplacement = displacement; // Pass displacement to fragment shader
+            vDisplacement = displacement;
             
             vec3 pos = position;
             pos.y += displacement;
-            vec4 displacedWorldPosition = modelMatrix * vec4(pos, 1.0);
-            vWorldPosition = displacedWorldPosition.xyz;
+            
+            // Calculate view-space position for fog
+            vec4 mvPosition = modelViewMatrix * vec4(pos, 1.0);
+            vFogDepth = -mvPosition.z; // View-space depth
+            
+            vWorldPosition = (modelMatrix * vec4(pos, 1.0)).xyz;
 
-            // Simplified normal calculation (unchanged)
+            // Normal calculation (unchanged)
             float eps = 0.1;
             float dx = noise(vec3((worldX + eps) * 0.3, worldZ * 0.3, time * 0.5)) - 
-                    noise(vec3((worldX - eps) * 0.3, worldZ * 0.3, time * 0.5));
+                      noise(vec3((worldX - eps) * 0.3, worldZ * 0.3, time * 0.5));
             float dz = noise(vec3(worldX * 0.3, (worldZ + eps) * 0.3, time * 0.5)) - 
-                    noise(vec3(worldX * 0.3, (worldZ - eps) * 0.3, time * 0.5));
+                      noise(vec3(worldX * 0.3, (worldZ - eps) * 0.3, time * 0.5));
             
             vNormal = normalize(vec3(-dx * 2.0, 1.0, -dz * 2.0));
-            gl_Position = projectionMatrix * modelViewMatrix * vec4(pos, 1.0);
+            gl_Position = projectionMatrix * mvPosition;
         }
     `,
     fragmentShader: `
-    varying vec3 vNormal;
-    varying vec3 vWorldPosition;
-    varying float vDisplacement;
-    uniform vec3 waterColor;
-    uniform vec3 lightDirection;
     uniform vec3 fogColor;
     uniform float fogNear;
     uniform float fogFar;
-    uniform vec3 cameraPos; // Camera position uniform
+    uniform vec3 waterColor;
+    uniform vec3 lightDirection;
+    uniform vec3 cameraPos;
     uniform float reflectionIntensity;
+    
+    varying vec3 vNormal;
+    varying vec3 vWorldPosition;
+    varying float vDisplacement;
+    varying float vFogDepth; // Received from vertex shader
 
     void main() {
         vec3 normal = normalize(vNormal);
         vec3 lightDir = normalize(lightDirection);
-        vec3 viewDir = normalize(cameraPos - vWorldPosition); // Calculate view direction
+        vec3 viewDir = normalize(cameraPos - vWorldPosition);
 
-        // Fresnel effect calculation
+        // Fresnel effect (unchanged)
         float fresnel = pow(clamp(1.0 - dot(normal, viewDir), 0.0, 1.0), 5.0);
-        fresnel *= reflectionIntensity; // Control reflection strength
+        fresnel *= reflectionIntensity;
 
-        // Base color gradient from displacement
+        // Color calculations (unchanged)
         float gradientFactor = smoothstep(-0.9, 0.9, vDisplacement);
-        vec3 darkColor = waterColor * 0.95;
-        vec3 lightColor = waterColor * 1.05;
-        vec3 baseColor = mix(darkColor, lightColor, gradientFactor);
+        vec3 baseColor = mix(waterColor * 0.95, waterColor * 1.05, gradientFactor);
+        vec3 specularColor = vec3(1.0) * pow(max(dot(normal, normalize(lightDir + viewDir)), 0.0), 128.0) * fresnel;
+        vec3 finalColor = mix(baseColor, mix(baseColor, vec3(1.0), fresnel), fresnel) * max(dot(normal, lightDir), 0.2) + specularColor;
 
-        // Specular highlights (Blinn-Phong model)
-        vec3 halfDir = normalize(lightDir + viewDir);
-        float specular = pow(max(dot(normal, halfDir), 0.0), 128.0);
-        vec3 specularColor = vec3(1.0) * specular * fresnel;
-
-        // Combine colors with Fresnel effect
-        vec3 reflectionColor = mix(baseColor, vec3(1.0), fresnel);
-        vec3 finalColor = mix(baseColor, reflectionColor, fresnel) * 
-                        max(dot(normal, lightDir), 0.2) + 
-                        specularColor;
-
-        // Apply fog
-        float depth = distance(vWorldPosition, cameraPos);
-        float fogFactor = smoothstep(fogNear, fogFar, depth);
+        // Apply fog using view-space depth
+        float fogFactor = smoothstep(fogNear, fogFar, vFogDepth);
         finalColor = mix(finalColor, fogColor, fogFactor);
 
-        // Alpha based on displacement
-        float alpha = 0.8 + 0.2 * abs(vDisplacement);
-
-        gl_FragColor = vec4(finalColor, alpha);
+        gl_FragColor = vec4(finalColor, 0.8 + 0.2 * abs(vDisplacement));
     }
 `,
     transparent: true,
     side: THREE.DoubleSide,
-    depthWrite: false
+    depthWrite: false,
+    fog: true // Enable fog updates from the scene
 });
 
 

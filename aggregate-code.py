@@ -60,7 +60,7 @@ def main():
         "./scripts/constants.js",
         "./scripts/main.js",
         # "./scripts/player.js",
-        # "./scripts/renderer.js",
+        "./scripts/renderer.js",
         # "./scripts/utils.js",
         "./scripts/world.js",
         # "./index.html",
