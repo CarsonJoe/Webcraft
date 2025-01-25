@@ -6,7 +6,8 @@ import { profiler } from './profiler.js';
 const CHUNK_LOADING = 1;
 const CHUNK_LOADED = 2;
 let chunkWorker = null;
-let geometryWorker = null;
+export let geometryWorkers = [];
+let currentGeometryWorkerIndex = 0;
 let initializationComplete = false;
 let workerInitialized = false;
 let sceneReady = false;
@@ -240,34 +241,36 @@ export function initWorld() {
     spawnPoint = findSuitableSpawnPoint(0, 0);
     console.log("Generated spawn point:", spawnPoint);
 
-    geometryWorker = new Worker(new URL('./geometryWorker.js', import.meta.url), { type: 'module' });
-    geometryWorker.postMessage({
-        type: 'init',
-        materials: materials,
-        seed: SEED
-    });
+    const workerCount = navigator.hardwareConcurrency || 4;
+    geometryWorkers = [];
 
-    geometryWorker.onmessage = function (e) {
-        if (e.data.type === 'geometry_data') {
-            try {
-                profiler.endTimer('meshGeneration');
-                
-                // Track based on generation type
-                if (e.data.isInitialGeneration) {
-                    profiler.trackChunkGenerated();
-                } else {
-                    profiler.trackChunkMeshed();
+    for (let i = 0; i < workerCount; i++) {
+        const worker = new Worker(new URL('./geometryWorker.js', import.meta.url), { type: 'module' });
+        worker.postMessage({
+            type: 'init',
+            materials: materials,
+            seed: SEED
+        });
+
+        worker.onmessage = function (e) {
+            if (e.data.type === 'geometry_data') {
+                try {
+                    profiler.endTimer('meshGeneration');
+                    if (e.data.isInitialGeneration) {
+                        profiler.trackChunkGenerated();
+                    } else {
+                        profiler.trackChunkMeshed();
+                    }
+                    if (e.data.solid.positions.length > 0 || e.data.water.positions.length > 0) {
+                        createChunkMeshes(e.data.chunkX, e.data.chunkZ, e.data.solid, e.data.water);
+                    }
+                } catch (error) {
+                    console.error('Error processing geometry:', error);
                 }
-                
-                // Only create meshes if geometry exists
-                if (e.data.solid.positions.length > 0 || e.data.water.positions.length > 0) {
-                    createChunkMeshes(e.data.chunkX, e.data.chunkZ, e.data.solid, e.data.water);
-                }
-            } catch (error) {
-                console.error('Error processing geometry:', error);
             }
-        }
-    };
+        };
+        geometryWorkers.push(worker);
+    }
 
     chunkWorker = new Worker(new URL('./chunksWorker.js', import.meta.url), {
         type: 'module'
@@ -309,7 +312,10 @@ export function initWorld() {
             });
 
             // 4. Send message with transferrable buffers
-            geometryWorker.postMessage({
+            const worker = geometryWorkers[currentGeometryWorkerIndex];
+            currentGeometryWorkerIndex = (currentGeometryWorkerIndex + 1) % geometryWorkers.length;
+
+            worker.postMessage({
                 type: 'process_chunk',
                 chunkX,
                 chunkZ,
@@ -417,34 +423,28 @@ function updateAdjacentChunks(chunkX, chunkZ) {
     });
 }
 
-function addToLoadQueue(x, z, priority = Infinity) {
+const PRIORITY_BANDS = [
+    {distance: 2, chunksPerFrame: 5},    // Immediate area
+    {distance: 4, chunksPerFrame: 3},    // Near area
+    {distance: RENDER_DISTANCE * 2, chunksPerFrame: 2} // Far area
+];
+
+function addToLoadQueue(x, z) {
     const chunkKey = `${x},${z}`;
-    const dx = x - currentPlayerChunkX;
-    const dz = z - currentPlayerChunkZ;
+    const dx = Math.abs(x - currentPlayerChunkX);
+    const dz = Math.abs(z - currentPlayerChunkZ);
+    const distance = dx + dz; // Manhattan distance
 
-    // 1. Skip out-of-bounds chunks
-    if (Math.abs(dx) > RENDER_DISTANCE + 1 || Math.abs(dz) > RENDER_DISTANCE + 1) return;
+    // Skip if out of bounds or already queued
+    if (distance > RENDER_DISTANCE * 2 + 1 || queuedChunks.has(chunkKey)) return;
 
-    // 2. Skip if already queued
-    if (queuedChunks.has(chunkKey)) return;
+    // Assign priority band
+    let priority = PRIORITY_BANDS.findIndex(b => distance <= b.distance);
+    priority = priority === -1 ? PRIORITY_BANDS.length : priority;
 
-    // 3. Add to queue and tracking set
-    const distanceSq = dx * dx + dz * dz;
-    chunkLoadQueue.push({ x, z, priority, distanceSq });
+    // Store in simple array with priority
+    chunkLoadQueue.push({x, z, priority});
     queuedChunks.add(chunkKey);
-
-    // 4. Maintain heap property (O(log n) insertion)
-    let index = chunkLoadQueue.length - 1;
-    while (index > 0) {
-        const parentIndex = Math.floor((index - 1) / 2);
-        if (
-            chunkLoadQueue[parentIndex].priority < chunkLoadQueue[index].priority ||
-            (chunkLoadQueue[parentIndex].priority === chunkLoadQueue[index].priority &&
-                chunkLoadQueue[parentIndex].distanceSq <= chunkLoadQueue[index].distanceSq)
-        ) break;
-        [chunkLoadQueue[parentIndex], chunkLoadQueue[index]] = [chunkLoadQueue[index], chunkLoadQueue[parentIndex]];
-        index = parentIndex;
-    }
 }
 
 function processChunkQueue() {
@@ -499,8 +499,8 @@ function processChunkQueue() {
     
         if (!isEdgeChunk) {
             // Check if all neighbors are loaded
-            const neighborsLoaded = [[1,0], [-1,0], [0,1], [0,-1]].every(([dx, dz]) => {
-                const neighborKey = `${x+dx},${z+dz}`;
+            const neighborsLoaded = [[1, 0], [-1, 0], [0, 1], [0, -1]].every(([dx, dz]) => {
+                const neighborKey = `${x + dx},${z + dz}`;
                 return chunks[neighborKey] && chunkStates[neighborKey] === CHUNK_LOADED;
             });
     
@@ -510,7 +510,7 @@ function processChunkQueue() {
         profiler.startTimer('meshGeneration');
         const chunkData = chunks[chunkKey];
         const clonedChunkData = new Int8Array(chunkData).buffer;
-
+    
         const adjacentChunks = {};
         [[1, 0], [-1, 0], [0, 1], [0, -1]].forEach(([dx, dz]) => {
             const adjChunkX = x + dx;
@@ -521,11 +521,16 @@ function processChunkQueue() {
                 adjacentChunks[adjKey] = adjClone;
             }
         });
-
+    
         const transferList = [clonedChunkData];
         Object.values(adjacentChunks).forEach(buffer => transferList.push(buffer));
-
-        geometryWorker.postMessage({
+    
+        // Select the next worker in the pool
+        const worker = geometryWorkers[currentGeometryWorkerIndex];
+        currentGeometryWorkerIndex = (currentGeometryWorkerIndex + 1) % geometryWorkers.length;
+    
+        // Send the chunk data to the selected worker
+        worker.postMessage({
             type: 'process_chunk',
             chunkX: x,
             chunkZ: z,
@@ -533,6 +538,9 @@ function processChunkQueue() {
             adjacentChunks,
             isInitialGeneration: false
         }, transferList);
+    
+        // Remove the chunk from the remesh queue
+        remeshQueue.delete(chunkKey);
     });
     remeshQueue.clear();
 

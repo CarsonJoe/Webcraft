@@ -8,15 +8,15 @@ export function getRandomRotationMatrix() {
     return [cos, -sin, sin, cos];
 }
 
-export function updateBlockSelector() {
-    const selector = document.getElementById('block-selector');
-    selector.innerHTML = Object.entries(materials).map(([type, material]) => `
-        <div class="block-item ${type == Player.selectedBlockType ? 'selected' : ''}">
-            <div class="block-color" style="background-color: #${material.color.toString(16).padStart(6, '0')}"></div>
-            <span>${type}: ${getBlockName(parseInt(type))}</span>
-        </div>
-    `).join('');
-}
+// export function updateBlockSelector() {
+//     const selector = document.getElementById('block-selector');
+//     selector.innerHTML = Object.entries(materials).map(([type, material]) => `
+//         <div class="block-item ${type == Player.selectedBlockType ? 'selected' : ''}">
+//             <div class="block-color" style="background-color: #${material.color.toString(16).padStart(6, '0')}"></div>
+//             <span>${type}: ${getBlockName(parseInt(type))}</span>
+//         </div>
+//     `).join('');
+// }
 
 export function getBlockName(blockType) {
     const blockNames = ['Air', 'Grass', 'Dirt', 'Stone', 'Sand', 'Water', 'Wood', 'Leaves', 'Slate', 'Limestone'];
