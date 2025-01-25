@@ -26,6 +26,10 @@ const Player = (function () {
     let canJump = false;
     let selectedBlockType = 1;
 
+    let canvas;
+    let escapeMenu;
+    let isIntentionalStateChange = false;
+
     // Player objects
     let pitchObject, yawObject, raycaster, camera;
 
@@ -35,26 +39,35 @@ const Player = (function () {
     // Time tracking
     let lastTime = performance.now();
 
+    // Escape Menu Controls
+    let isMenuOpen = true;
+
     function init(cam, scene) {
+        // Initialize DOM references
+        canvas = document.querySelector('canvas');
+        escapeMenu = document.getElementById('escape-menu');
+
+        // Show menu initially
+        escapeMenu.style.display = 'block';
+
         camera = cam;
         pitchObject = new THREE.Object3D();
         pitchObject.position.y = EYE_HEIGHT;
         pitchObject.add(camera);
 
         yawObject = new THREE.Object3D();
-
-        // Set initial position to spawn point with Y above terrain
-        yawObject.position.set(
-            spawnPoint.x,
-            CHUNK_HEIGHT, // Set Y to maximum chunk height
-            spawnPoint.z
-        );
-
+        yawObject.position.set(spawnPoint.x, CHUNK_HEIGHT, spawnPoint.z);
         yawObject.add(pitchObject);
         scene.add(yawObject);
 
         raycaster = new THREE.Raycaster();
         setupEventListeners();
+
+        // Setup resume button
+        document.getElementById('resume-btn').addEventListener('click', () => {
+            toggleEscapeMenu(false);
+        });
+
         setupPointerLock();
     }
 
@@ -67,23 +80,60 @@ const Player = (function () {
     }
 
     function setupPointerLock() {
-        const canvas = document.querySelector('canvas');
-        canvas.addEventListener('click', () => {
-            canvas.requestPointerLock();
+        document.addEventListener('pointerlockchange', () => {
+            if (document.pointerLockElement === canvas) {
+                isMenuOpen = false;
+                escapeMenu.style.display = 'none';
+            } else {
+                // Only show menu if the change wasn't initiated by user interaction
+                if (!isIntentionalStateChange) {
+                    isMenuOpen = true;
+                    escapeMenu.style.display = 'block';
+                }
+            }
         });
-
-        document.addEventListener('pointerlockchange', onPointerLockChange, false);
     }
 
-    function onPointerLockChange() {
-        if (document.pointerLockElement === document.querySelector('canvas')) {
-            document.addEventListener('mousemove', onMouseMove, false);
+    function toggleEscapeMenu(shouldOpen) {
+        if (typeof shouldOpen === 'boolean') {
+            if (isMenuOpen === shouldOpen) return;
+            isMenuOpen = shouldOpen;
         } else {
-            document.removeEventListener('mousemove', onMouseMove, false);
+            isMenuOpen = !isMenuOpen;
         }
+    
+        isIntentionalStateChange = true;
+        escapeMenu.style.display = isMenuOpen ? 'block' : 'none';
+    
+        if (isMenuOpen) {
+            document.exitPointerLock();
+        } else {
+            requestPointerLockWithRetry();
+        }
+        
+        setTimeout(() => {
+            isIntentionalStateChange = false;
+        }, 100);
+    }
+
+    function requestPointerLockWithRetry() {
+        if (document.pointerLockElement === canvas) return;
+    
+        canvas.requestPointerLock()
+            .catch(error => {
+                console.log('Pointer lock failed, retrying...', error);
+                if (error.name === 'SecurityError' || error.name === 'AbortError') {
+                    setTimeout(requestPointerLockWithRetry, 100);
+                } else {
+                    isMenuOpen = true;
+                    escapeMenu.style.display = 'block';
+                }
+            });
     }
 
     const onMouseMove = (event) => {
+        if (document.pointerLockElement !== canvas) return;
+
         const movementX = event.movementX || event.mozMovementX || event.webkitMovementX || 0;
         const movementY = event.movementY || event.mozMovementY || event.webkitMovementY || 0;
 
@@ -93,6 +143,7 @@ const Player = (function () {
     };
 
     function onMouseDown(event) {
+        if (document.pointerLockElement !== canvas) return;
 
         if (document.pointerLockElement !== document.querySelector('canvas')) return;
 
@@ -159,9 +210,12 @@ const Player = (function () {
         if (event.code === 'ShiftLeft') {
             isSprinting = true;
         }
-        if (event.code === 'KeyF') { // Toggle flying on 'F' press
+        if (event.code === 'Escape') {
+            toggleEscapeMenu(!isMenuOpen);
+        }
+        if (event.code === 'KeyF') {
             isFlying = !isFlying;
-            velocity.set(0, 0, 0); // Reset velocity to stop any movement
+            velocity.set(0, 0, 0);
         }
     }
 
@@ -173,7 +227,7 @@ const Player = (function () {
     }
 
     function update() {
-        if (!yawObject) return;
+        if (!yawObject || document.pointerLockElement !== canvas) return;
 
         const currentTime = performance.now();
         const deltaTime = (currentTime - lastTime) / 1000; // Convert to seconds

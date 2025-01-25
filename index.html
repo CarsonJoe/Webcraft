@@ -48,7 +48,28 @@
         </div>
     </div>
 
-    <div id="debug-ui">
+    <div id="escape-menu" class="escape-menu">
+        <div class="menu-header">
+            <div class="scanline"></div>
+            <h2>SYSTEM MENU</h2>
+        </div>
+        <div class="menu-content">
+            <button id="resume-btn" class="menu-btn">
+                <span class="btn-glow"></span>
+                RESUME OPERATION
+            </button>
+            <button id="settings-btn" class="menu-btn">
+                <span class="btn-glow"></span>
+                CONFIGURE SYSTEMS
+            </button>
+        </div>
+        <div class="menu-footer">
+            <div class="status-line">CURRENT BUILD: ALPHA-0.1.0</div>
+            <div class="warning">WARNING: UNSAVED PROGRESS WILL BE TERMINATED</div>
+        </div>
+    </div>
+
+    <!-- <div id="debug-ui">
         <div class="debug-section">
             <h3>Performance</h3>
             <div id="frame-stats"></div>
@@ -61,7 +82,7 @@
             <h3>Memory</h3>
             <div id="memory-stats"></div>
         </div>
-    </div>
+    </div> -->
     <!-- <div id="block-selector"></div> -->
     <script type="module" src="scripts/utils.js"></script>
     <script type="module" src="scripts/world.js"></script>

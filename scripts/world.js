@@ -40,9 +40,9 @@ const materials = {
     2: { color: 0x997260 }, // Dirt
     3: { color: 0x888888 }, // Stone
     4: { color: 0xe3dda6 }, // Sand
-    5: { color: 0x6380ec }, // Water
+    5: { color: 0x2e4394 }, // Water
     6: { color: 0x7b6e65 }, // Wood
-    7: { color: 0x1f541f }, // Leaves
+    7: { color: 0x163b16 }, // Leaves
     8: { color: 0x3b4044 }, // Slate
     9: { color: 0xFFFFFF }  // Limestone
 };
@@ -51,7 +51,7 @@ const solidMaterial = new THREE.MeshLambertMaterial({ vertexColors: true });
 export const waterMaterial = new THREE.ShaderMaterial({
     uniforms: {
         time: { value: 0 },
-        waterColor: { value: new THREE.Color(0x6fbffc) },
+        waterColor: { value: new THREE.Color(0x5782e6) },
         lightDirection: { value: new THREE.Vector3(1, 1, 1).normalize() },
         waveScale: { value: .2 },
         fogColor: { value: new THREE.Color(0x619dde) },

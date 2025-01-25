@@ -1,6 +1,6 @@
 import Player from './player.js';
 import { CHUNK_HEIGHT } from './constants.js';
-import { updateChunks, setBlock, getBlock, waterMaterial } from './world.js';
+import { updateChunks, setBlock, getBlock } from './world.js';
 import { initWorld, notifySceneReady, initializationComplete } from './world.js';
 import { createSkybox, initRenderer, render, chunkMeshes } from './renderer.js';
 
@@ -243,7 +243,7 @@ function animate(timestamp) {
     updateCloudPosition();
     render(scene, camera);
     profiler.endFrame();
-    updateDebugUI();
+    // updateDebugUI();
 }
 
 animate();
