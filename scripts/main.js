@@ -16,6 +16,8 @@ notifySceneReady();
 createSkybox(scene, renderer);
 
 
+let lastTime = 0;
+let deltaTime = 0;
 
 // Add ambient light
 const ambientLight = new THREE.AmbientLight(0x404050);
@@ -209,45 +211,37 @@ document.addEventListener('contextmenu', (event) => event.preventDefault());
 // Animation loop
 let gameStarted = false;
 
-function animate() {
+function animate(timestamp) {
     requestAnimationFrame(animate);
     profiler.startFrame();
 
     if (!gameStarted) {
         if (initializationComplete) {
             gameStarted = true;
+            lastTime = timestamp;
         }
         return;
     }
+
+    // Calculate delta time in seconds
+    deltaTime = (timestamp - lastTime) / 1000;
+    lastTime = timestamp;
+
+    // Clamp delta time to prevent physics issues
+    deltaTime = Math.min(deltaTime, 0.033); // Max 30ms (≈30fps)
 
     if (cloudMaterial) {
         cloudMaterial.uniforms.time.value = performance.now() / 1000;
         cloudMaterial.uniforms.cloudPosition.value.copy(clouds.position);
     }
 
-    // Update water material uniforms
-    if (waterMaterial && waterMaterial.uniforms && waterMaterial.uniforms.time) {
-        waterMaterial.uniforms.time.value = performance.now() / 1000;
-        waterMaterial.uniforms.lightDirection.value.copy(directionalLight.position).normalize();
-        waterMaterial.uniforms.fogColor.value.copy(scene.fog.color);
-        waterMaterial.uniforms.fogNear.value = scene.fog.near;
-        waterMaterial.uniforms.fogFar.value = scene.fog.far;
-        const cameraWorldPos = new THREE.Vector3();
-        camera.getWorldPosition(cameraWorldPos);
-
-        waterMaterial.uniforms.cameraPos.value.copy(cameraWorldPos);
-    }
-
-    Player.update(getBlock);
+    // Update player with delta time
+    Player.update(getBlock, deltaTime);
+    
+    // Rest of the animate function remains the same...
     updateChunks(Player.getPosition());
     updateCloudPosition();
-
-    // Update camera matrix for frustum culling
-    camera.updateMatrixWorld();
-
-    // Force render even if no changes
     render(scene, camera);
-    
     profiler.endFrame();
     updateDebugUI();
 }

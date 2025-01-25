@@ -5,10 +5,10 @@ import { chunkMeshes } from "./renderer.js";
 // Player module
 const Player = (function () {
     // Player constants
-    const NORMAL_SPEED = 8; // Units per second
+    const NORMAL_SPEED = 12; // Units per second
     const SPRINT_SPEED = NORMAL_SPEED * 1.4;
     const SWIM_SPEED = 1.5; // Units per second
-    const JUMP_FORCE = 16; // Units per second
+    const JUMP_FORCE = 12; // Units per second
     const GRAVITY = 20; // Units per second squared
     const WATER_GRAVITY = 4; // Units per second squared
     const PLAYER_WIDTH = 2.8;

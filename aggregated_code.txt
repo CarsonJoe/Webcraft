@@ -357,7 +357,7 @@ const materials = {
     4: { color: 0xe3dda6 }, // Sand
     5: { color: 0x6380ec }, // Water
     6: { color: 0x7b6e65 }, // Wood
-    7: { color: 0x228B22 }, // Leaves
+    7: { color: 0x1f541f }, // Leaves
     8: { color: 0x3b4044 }, // Slate
     9: { color: 0xFFFFFF }  // Limestone
 };
@@ -542,6 +542,9 @@ export const waterMaterial = new THREE.ShaderMaterial({
     depthWrite: false
 });
 
+
+let leavesMaterial = null;
+
 // Initialize world systems
 export function initWorld() {
     console.log("[World] Initializing world system...");
@@ -569,8 +572,8 @@ export function initWorld() {
         worker.onmessage = function (e) {
             if (e.data.type === 'geometry_data') {
                 try {
-                    if (e.data.solid.positions.length > 0 || e.data.water.positions.length > 0) {
-                        createChunkMeshes(e.data.chunkX, e.data.chunkZ, e.data.solid, e.data.water);
+                    if (e.data.solid.positions.length > 0 || e.data.water.positions.length > 0 || e.data.leaves.positions.length > 0) {
+                        createChunkMeshes(e.data.chunkX, e.data.chunkZ, e.data.solid, e.data.water, e.data.leaves);
                     }
                 } catch (error) {
                     console.error('Error processing geometry:', error);
@@ -643,43 +646,157 @@ export function initWorld() {
     });
 }
 
-// scripts/world.js
-function createChunkMeshes(chunkX, chunkZ, solidData, waterData) {
+function createChunkMeshes(chunkX, chunkZ, solidData, waterData, leavesData) {
     const chunkKey = `${chunkX},${chunkZ}`;
 
-    // Remove existing meshes if they exist
-    if (chunkMeshes[chunkKey]) {
-        scene.remove(chunkMeshes[chunkKey].solid);
-        scene.remove(chunkMeshes[chunkKey].water);
-        chunkMeshes[chunkKey].solid.geometry.dispose();
-        chunkMeshes[chunkKey].water.geometry.dispose();
+    // Initialize leaves material once
+    if (!leavesMaterial) {
+        leavesMaterial = new THREE.ShaderMaterial({
+            uniforms: THREE.UniformsUtils.merge([
+                THREE.UniformsLib.fog, // Includes fogColor, fogNear, fogFar
+                {
+                    // Add any custom uniforms here if needed
+                }
+            ]),
+            vertexShader: `
+                varying vec3 vColor;
+                varying float vFogDepth;
+                attribute vec2 offset;
+
+                void main() {
+                    vec4 worldPosition = modelMatrix * vec4(position, 1.0);
+                    
+                    // Billboard calculations
+                    vec3 look = normalize(worldPosition.xyz - cameraPosition);
+                    vec3 right = normalize(cross(vec3(0.0, 1.0, 0.0), look));
+                    vec3 up = cross(look, right);
+                    
+                    // Apply 1.7x scale
+                    vec3 pos = worldPosition.xyz;
+                    pos += right * offset.x * 1.36; // 0.8 * 1.7
+                    pos += up * offset.y * 1.36;
+                    
+                    // Transform to view space
+                    vec4 mvPosition = viewMatrix * vec4(pos, 1.0);
+                    gl_Position = projectionMatrix * mvPosition;
+                    
+                    // Depth adjustments
+                    gl_Position.z -= 0.0003; // Depth bias
+                    vFogDepth = -mvPosition.z; // For fog calculation
+                    
+                    vColor = color;
+                }
+            `,
+            fragmentShader: `
+                uniform vec3 fogColor;
+                uniform float fogNear;
+                uniform float fogFar;
+                
+                varying vec3 vColor;
+                varying float vFogDepth;
+                
+                void main() {
+                    // Base color
+                    vec3 color = vColor;
+                    
+                    // Fog calculation
+                    float fogFactor = smoothstep(fogNear, fogFar, vFogDepth);
+                    
+                    // Apply fog
+                    color = mix(color, fogColor, fogFactor);
+                    
+                    gl_FragColor = vec4(color, 1.0);
+                }
+            `,
+            transparent: false,
+            depthWrite: true,
+            depthTest: true,
+            alphaTest: 0.5,
+            fog: true,
+            vertexColors: true,
+            side: THREE.DoubleSide,
+            polygonOffset: true,
+            polygonOffsetFactor: 1.0,
+            polygonOffsetUnits: 1.0,
+        });
     }
 
-    // Create geometries
-    const solidGeometry = createGeometryFromData(solidData);
-    const waterGeometry = createGeometryFromData(waterData);
+    // Remove existing meshes safely
+    if (chunkMeshes[chunkKey]) {
+        const { solid, water, leaves } = chunkMeshes[chunkKey];
+        
+        // Always remove from scene if they exist
+        if (solid) {
+            scene.remove(solid);
+            if (solid.geometry) solid.geometry.dispose();
+        }
+        if (water) {
+            scene.remove(water);
+            if (water.geometry) water.geometry.dispose();
+        }
+        if (leaves) {
+            scene.remove(leaves);
+            if (leaves.geometry) leaves.geometry.dispose();
+        }
+    }
 
-    // Create meshes with shared materials
-    const solidMesh = new THREE.Mesh(solidGeometry, solidMaterial);
-    const waterMesh = new THREE.Mesh(waterGeometry, waterMaterial);
+    // Create new meshes only if they have geometry
+    let solidMesh = null;
+    let waterMesh = null;
+    let leavesMesh = null;
 
-    // Position meshes
+    // Create solid mesh if data exists
+    if (solidData?.positions?.length > 0) {
+        const solidGeometry = createGeometryFromData(solidData);
+        solidMesh = new THREE.Mesh(solidGeometry, solidMaterial);
+    }
+
+    // Create water mesh if data exists
+    if (waterData?.positions?.length > 0) {
+        const waterGeometry = createGeometryFromData(waterData);
+        waterMesh = new THREE.Mesh(waterGeometry, waterMaterial);
+    }
+
+    // Create leaves mesh if data exists
+    if (leavesData?.positions?.length > 0) {
+        const leavesGeometry = new THREE.BufferGeometry();
+        leavesGeometry.setAttribute('position', new THREE.BufferAttribute(leavesData.positions, 3));
+        leavesGeometry.setAttribute('offset', new THREE.BufferAttribute(leavesData.offsets, 2));
+        leavesGeometry.setAttribute('color', new THREE.BufferAttribute(leavesData.colors, 3));
+        leavesGeometry.setIndex(new THREE.BufferAttribute(leavesData.indices, 1));
+        leavesMesh = new THREE.Mesh(leavesGeometry, leavesMaterial);
+        leavesMesh.frustumCulled = false;
+        leavesMesh.renderOrder = 1;
+    }
+
+    // Position and add meshes to scene
     const worldX = chunkX * CHUNK_SIZE;
     const worldZ = chunkZ * CHUNK_SIZE;
-    solidMesh.position.set(worldX, 0, worldZ);
-    waterMesh.position.set(worldX, 0, worldZ);
 
-    // Add to scene
-    scene.add(solidMesh);
-    scene.add(waterMesh);
+    if (solidMesh) {
+        solidMesh.position.set(worldX, 0, worldZ);
+        scene.add(solidMesh);
+        solidMesh.castShadow = true;
+        solidMesh.receiveShadow = true;
+    }
 
-    // Store references
-    chunkMeshes[chunkKey] = { solid: solidMesh, water: waterMesh };
+    if (waterMesh) {
+        waterMesh.position.set(worldX, 0, worldZ);
+        scene.add(waterMesh);
+        waterMesh.receiveShadow = true;
+    }
 
-    // Enable shadows
-    solidMesh.castShadow = true;
-    solidMesh.receiveShadow = true;
-    waterMesh.receiveShadow = true;
+    if (leavesMesh) {
+        leavesMesh.position.set(worldX, 0, worldZ);
+        scene.add(leavesMesh);
+    }
+
+    // Update chunk meshes reference
+    chunkMeshes[chunkKey] = { 
+        solid: solidMesh || null, 
+        water: waterMesh || null, 
+        leaves: leavesMesh || null 
+    };
 }
 
 function createGeometryFromData(data) {
@@ -1276,12 +1393,13 @@ function generateChunkFeatures(chunkX, chunkZ) {
 
 const TREE_SCALE = 1; // Adjust this value to scale tree size
 
-function generateLargeTree(chunk, chunkX, chunkZ, worldX, worldZ, baseHeight, scale = 2.0) {
-    // Scale-adjusted tree dimensions
-    const treeHeight = Math.max(5, Math.floor((Math.random() * 10 + 15) * scale));
-    const trunkHeight = Math.max(3, Math.floor(treeHeight * 0.7));
-    const leafRadius = Math.floor(treeHeight * 0.4) + 2;
-    
+function generateLargeTree(chunk, chunkX, chunkZ, worldX, worldZ, baseHeight, scale = 1.5) {
+    // Calculate scaled tree dimensions
+    const unscaledHeight = Math.floor(Math.random() * 10) + 15;
+    const treeHeight = Math.max(1, Math.floor(unscaledHeight * scale));
+    const trunkHeight = Math.floor(treeHeight * 0.7);
+    const leafRadius = Math.floor(treeHeight * 0.4) + Math.floor(2 * scale);
+
     // Precompute chunk boundaries
     const chunkStartX = chunkX * CHUNK_SIZE;
     const chunkEndX = chunkStartX + CHUNK_SIZE - 1;
@@ -1295,14 +1413,11 @@ function generateLargeTree(chunk, chunkX, chunkZ, worldX, worldZ, baseHeight, sc
         if (getBlockInChunk(chunk, localX, baseHeight, localZ) === 6) return;
     }
 
-    // Optimized leaves generation with scale-aware parameters
-    const leafStartOffset = Math.floor(5 * scale);
-    const leavesStartY = baseHeight + trunkHeight - leafStartOffset;
+    // Optimized leaves generation
+    const leavesStartY = baseHeight + Math.max(0, trunkHeight - Math.floor(5 * scale));
     const leavesEndY = baseHeight + treeHeight;
-    const leafTaperRate = 3 * scale;
-    
     for (let y = leavesStartY; y <= leavesEndY; y++) {
-        const radius = leafRadius - Math.floor((y - leavesStartY) / leafTaperRate);
+        const radius = leafRadius - Math.floor((y - leavesStartY) / 3);
         if (radius <= 0) continue;
 
         const radiusSq = radius * radius;
@@ -1322,13 +1437,13 @@ function generateLargeTree(chunk, chunkX, chunkZ, worldX, worldZ, baseHeight, sc
                 setBlockIfInChunk(
                     chunk, chunkX, chunkZ,
                     worldX + dx, worldZ + dz, y,
-                    7, 0.2
+                    7, 0.08 // 8% leaves
                 );
             }
         }
     }
 
-    // Optimized trunk generation with scaled curvature
+    // Optimized trunk generation with bending
     const bendDirection = Math.random() * Math.PI * 2;
     const cosBend = Math.cos(bendDirection);
     const sinBend = Math.sin(bendDirection);
@@ -1349,7 +1464,7 @@ function generateLargeTree(chunk, chunkX, chunkZ, worldX, worldZ, baseHeight, sc
         const trunkX = worldX + bendAmount * bendProgress * cosBend;
         const trunkZ = worldZ + bendAmount * bendProgress * sinBend;
 
-        // Calculate chunk-optimized bounds
+        // Calculate dx bounds for current chunk
         const dxMin = Math.max(-maxD, Math.ceil(chunkStartX - 0.5 - trunkX));
         const dxMax = Math.min(maxD, Math.floor(chunkEndX + 0.5 - trunkX - 1e-9));
         if (dxMin > dxMax) continue;
@@ -1634,6 +1749,7 @@ self.onmessage = function (e) {
 function generateGeometry(chunkX, chunkZ, chunkData, adjacentChunks) {
     const solid = { positions: [], normals: [], colors: [], indices: [] };
     const water = { positions: [], normals: [], indices: [] };
+    const leaves = { positions: [], offsets: [], colors: [], indices: [] };
 
     // Moved addFace inside generateGeometry and added AO calculations
     const addFace = (isWater, normal, localX, localY, localZ, color, isLeaf = false) => {
@@ -1765,7 +1881,7 @@ function generateGeometry(chunkX, chunkZ, chunkData, adjacentChunks) {
 
                 // Skip processing completely enclosed solid blocks
                 if (x > 0 && x < CHUNK_SIZE - 1 &&
-                    z > 0 && z < CHUNK_SIZE - 1 &&
+                    z > 0 && z < CHUNK_SIZE - 1 && 
                     y > 0 && y < CHUNK_HEIGHT - 1) {
                     if (!isTransparent(neighbors.px) &&
                         !isTransparent(neighbors.nx) &&
@@ -1787,23 +1903,28 @@ function generateGeometry(chunkX, chunkZ, chunkData, adjacentChunks) {
                     chunkZ * CHUNK_SIZE + z,
                     blockType
                 );
-                const finalColor = isWater ? baseColor : // Use base color directly for water
-                    baseColor.map((c, i) => Math.min(1, Math.max(0, c * colorMultipliers[i])));
+                const finalColor = baseColor.map((c, i) => Math.min(1, Math.max(0, c * colorMultipliers[i])));
 
                 if (isLeaf) {
-                    // Render all faces for leaves and apply independent rotation
-                    if ((isWater && neighbors.px === 0) || (!isWater && isTransparent(neighbors.px)))
-                        addFace(isWater, [1, 0, 0], x, y, z, finalColor, true); // Right face
-                    if ((isWater && neighbors.nx === 0) || (!isWater && isTransparent(neighbors.nx)))
-                        addFace(isWater, [-1, 0, 0], x, y, z, finalColor, true); // Left face
-                    if ((isWater && neighbors.py === 0) || (!isWater && isTransparent(neighbors.py)))
-                        addFace(isWater, [0, 1, 0], x, y, z, finalColor, true); // Top face
-                    if ((isWater && neighbors.ny === 0) || (!isWater && isTransparent(neighbors.ny)))
-                        addFace(isWater, [0, -1, 0], x, y, z, finalColor, true); // Bottom face
-                    if ((isWater && neighbors.pz === 0) || (!isWater && isTransparent(neighbors.pz)))
-                        addFace(isWater, [0, 0, 1], x, y, z, finalColor, true); // Front face
-                    if ((isWater && neighbors.nz === 0) || (!isWater && isTransparent(neighbors.nz)))
-                        addFace(isWater, [0, 0, -1], x, y, z, finalColor, true); // Back face
+                    const cx = x + 0.5;
+                    const cy = y + 0.5;
+                    const cz = z + 0.5;
+                    const offsets = [
+                        [-0.5, -0.5], [0.5, -0.5],
+                        [0.5, 0.5], [-0.5, 0.5]
+                    ];
+                    const baseIndex = leaves.positions.length / 3;
+
+                    offsets.forEach(([ox, oy]) => {
+                        leaves.positions.push(cx, cy, cz);
+                        leaves.offsets.push(ox, oy);
+                        leaves.colors.push(...finalColor);
+                    });
+
+                    leaves.indices.push(
+                        baseIndex, baseIndex + 1, baseIndex + 2,
+                        baseIndex, baseIndex + 2, baseIndex + 3
+                    );
                 } else {
                     // Existing face checks for other block types
                     if ((isWater && neighbors.px === 0) || (!isWater && isTransparent(neighbors.px)))
@@ -1828,7 +1949,17 @@ function generateGeometry(chunkX, chunkZ, chunkData, adjacentChunks) {
         chunkX,
         chunkZ,
         solid: packageGeometry(solid),
-        water: packageGeometry(water)
+        water: packageGeometry(water),
+        leaves: packageLeavesGeometry(leaves) || { positions: [], offsets: [], colors: [], indices: [] }
+    };
+}
+
+function packageLeavesGeometry(leaves) {
+    return {
+        positions: new Float32Array(leaves.positions),
+        offsets: new Float32Array(leaves.offsets),
+        colors: new Float32Array(leaves.colors),
+        indices: new Uint32Array(leaves.indices)
     };
 }
 
