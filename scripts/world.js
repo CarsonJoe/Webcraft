@@ -29,11 +29,6 @@ const blockColors = new Map();
 let currentPlayerChunkX = 0;
 let currentPlayerChunkZ = 0;
 
-// Performance management
-const MAX_CHUNKS_PER_FRAME = 50;
-let frameBudget = 16; // Start with 16ms (~60fps)
-let lastFrameTime = performance.now();
-
 // Materials definition
 const materials = {
     0: { color: 0x000000 }, // Air
@@ -451,23 +446,10 @@ function processChunkQueue() {
     if (!workerInitialized || !sceneReady) return;
     profiler.startTimer('chunkProcessing');
 
-    const now = performance.now();
-    const timeSinceLastFrame = now - lastFrameTime;
-    lastFrameTime = now;
-
-    if (timeSinceLastFrame < 16) {
-        frameBudget += 16 - timeSinceLastFrame;
-    } else {
-        frameBudget -= timeSinceLastFrame - 16;
-    }
-
-    frameBudget = Math.max(8, Math.min(32, frameBudget));
-
-    const startTime = performance.now();
     let processed = 0;
 
     // Process load queue first
-    while (chunkLoadQueue.length > 0 && processed < MAX_CHUNKS_PER_FRAME) {
+    while (chunkLoadQueue.length > 0) {
         const { x, z } = chunkLoadQueue.shift();
         queuedChunks.delete(`${x},${z}`);
         const chunkKey = `${x},${z}`;
@@ -479,7 +461,6 @@ function processChunkQueue() {
             profiler.trackChunkGenerated();
         }
 
-        if (performance.now() - startTime > frameBudget) break;
     }
 
     // Process remesh queue
