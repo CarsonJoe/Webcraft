@@ -269,7 +269,7 @@ function generateGeometry(chunkX, chunkZ, chunkData, adjacentChunks) {
 
                 // Skip processing completely enclosed solid blocks
                 if (x > 0 && x < CHUNK_SIZE - 1 &&
-                    z > 0 && z < CHUNK_SIZE - 1 &&
+                    z > 0 && z < CHUNK_SIZE - 1 && 
                     y > 0 && y < CHUNK_HEIGHT - 1) {
                     if (!isTransparent(neighbors.px) &&
                         !isTransparent(neighbors.nx) &&
