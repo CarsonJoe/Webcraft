@@ -3,6 +3,7 @@ import { CHUNK_HEIGHT } from './constants.js';
 import { updateChunks, setBlock, getBlock } from './world.js';
 import { initWorld, notifySceneReady, initializationComplete } from './world.js';
 import { createSkybox, initRenderer, render, chunkMeshes } from './renderer.js';
+import { UIManager } from './uiManager.js';
 
 // Set up the scene, camera, and renderer
 const scene = new THREE.Scene();
@@ -201,7 +202,11 @@ function updateCloudPosition() {
     clouds.position.z = playerPos.z;
 }
 
-// Initialize the player
+
+// Initialize UI first
+UIManager.init();
+
+// Then initialize player
 Player.init(camera, scene);
 
 

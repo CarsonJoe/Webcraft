@@ -1,6 +1,7 @@
 import { CHUNK_HEIGHT, CHUNK_SIZE } from './constants.js';
 import { getBlock, updateBlock, chunks, addToLoadQueue, spawnPoint } from "./world.js";
 import { chunkMeshes } from "./renderer.js";
+import { UIManager } from "./uiManager.js";
 
 // Player module
 const Player = (function () {
@@ -11,10 +12,10 @@ const Player = (function () {
     const JUMP_FORCE = 12; // Units per second
     const GRAVITY = 20; // Units per second squared
     const WATER_GRAVITY = 4; // Units per second squared
-    const PLAYER_WIDTH = 2.8;
-    const PLAYER_HEIGHT = 7.8;
+    const PLAYER_WIDTH = 3.5;
+    const PLAYER_HEIGHT = 9.5;
     const HALF_WIDTH = PLAYER_WIDTH / 2;
-    const EYE_HEIGHT = 7.5;
+    const EYE_HEIGHT = 9.2;
     const STEP_HEIGHT = 1.0; // Maximum height of a step the player can automatically climb
 
 
@@ -26,10 +27,6 @@ const Player = (function () {
     let canJump = false;
     let selectedBlockType = 1;
 
-    let canvas;
-    let escapeMenu;
-    let isIntentionalStateChange = false;
-
     // Player objects
     let pitchObject, yawObject, raycaster, camera;
 
@@ -39,36 +36,22 @@ const Player = (function () {
     // Time tracking
     let lastTime = performance.now();
 
-    // Escape Menu Controls
-    let isMenuOpen = true;
-
     function init(cam, scene) {
-        // Initialize DOM references
-        canvas = document.querySelector('canvas');
-        escapeMenu = document.getElementById('escape-menu');
-
-        // Show menu initially
-        escapeMenu.style.display = 'block';
-
+        // Get canvas from UIManager instead of querying directly
+        const canvas = UIManager.getCanvas();
+    
         camera = cam;
         pitchObject = new THREE.Object3D();
         pitchObject.position.y = EYE_HEIGHT;
         pitchObject.add(camera);
-
+    
         yawObject = new THREE.Object3D();
         yawObject.position.set(spawnPoint.x, CHUNK_HEIGHT, spawnPoint.z);
         yawObject.add(pitchObject);
         scene.add(yawObject);
-
+    
         raycaster = new THREE.Raycaster();
         setupEventListeners();
-
-        // Setup resume button
-        document.getElementById('resume-btn').addEventListener('click', () => {
-            toggleEscapeMenu(false);
-        });
-
-        setupPointerLock();
     }
 
     function setupEventListeners() {
@@ -79,60 +62,8 @@ const Player = (function () {
         document.addEventListener('keyup', onKeyUp);
     }
 
-    function setupPointerLock() {
-        document.addEventListener('pointerlockchange', () => {
-            if (document.pointerLockElement === canvas) {
-                isMenuOpen = false;
-                escapeMenu.style.display = 'none';
-            } else {
-                // Only show menu if the change wasn't initiated by user interaction
-                if (!isIntentionalStateChange) {
-                    isMenuOpen = true;
-                    escapeMenu.style.display = 'block';
-                }
-            }
-        });
-    }
-
-    function toggleEscapeMenu(shouldOpen) {
-        if (typeof shouldOpen === 'boolean') {
-            if (isMenuOpen === shouldOpen) return;
-            isMenuOpen = shouldOpen;
-        } else {
-            isMenuOpen = !isMenuOpen;
-        }
-    
-        isIntentionalStateChange = true;
-        escapeMenu.style.display = isMenuOpen ? 'block' : 'none';
-    
-        if (isMenuOpen) {
-            document.exitPointerLock();
-        } else {
-            requestPointerLockWithRetry();
-        }
-        
-        setTimeout(() => {
-            isIntentionalStateChange = false;
-        }, 100);
-    }
-
-    function requestPointerLockWithRetry() {
-        if (document.pointerLockElement === canvas) return;
-    
-        canvas.requestPointerLock()
-            .catch(error => {
-                console.log('Pointer lock failed, retrying...', error);
-                if (error.name === 'SecurityError' || error.name === 'AbortError') {
-                    setTimeout(requestPointerLockWithRetry, 100);
-                } else {
-                    isMenuOpen = true;
-                    escapeMenu.style.display = 'block';
-                }
-            });
-    }
-
     const onMouseMove = (event) => {
-        if (document.pointerLockElement !== canvas) return;
+        if (!UIManager.isInputEnabled()) return;
 
         const movementX = event.movementX || event.mozMovementX || event.webkitMovementX || 0;
         const movementY = event.movementY || event.mozMovementY || event.webkitMovementY || 0;
@@ -143,7 +74,7 @@ const Player = (function () {
     };
 
     function onMouseDown(event) {
-        if (document.pointerLockElement !== canvas) return;
+        if (!UIManager.isInputEnabled()) return;
 
         if (document.pointerLockElement !== document.querySelector('canvas')) return;
 
@@ -210,9 +141,6 @@ const Player = (function () {
         if (event.code === 'ShiftLeft') {
             isSprinting = true;
         }
-        if (event.code === 'Escape') {
-            toggleEscapeMenu(!isMenuOpen);
-        }
         if (event.code === 'KeyF') {
             isFlying = !isFlying;
             velocity.set(0, 0, 0);
@@ -227,7 +155,7 @@ const Player = (function () {
     }
 
     function update() {
-        if (!yawObject || document.pointerLockElement !== canvas) return;
+        if (!yawObject || !UIManager.isInputEnabled()) return;
 
         const currentTime = performance.now();
         const deltaTime = (currentTime - lastTime) / 1000; // Convert to seconds
