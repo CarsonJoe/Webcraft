@@ -12,7 +12,6 @@ let initializationComplete = false;
 let workerInitialized = false;
 let sceneReady = false;
 export let spawnPoint = null;
-export const collisionGeometry = new Map();
 
 
 let lastUpdateTime = 0;
@@ -24,7 +23,6 @@ const chunkStates = {};
 const queuedChunks = new Set(); // Track chunk keys like "x,z"
 let remeshQueue = new Set();
 const chunkLoadQueue = [];      // Use as a priority queue (heap)
-const blockColors = new Map();
 
 let currentPlayerChunkX = 0;
 let currentPlayerChunkZ = 0;
@@ -230,7 +228,7 @@ export function initWorld() {
     console.log(`[World] Using seed: ${SEED}`);
 
 
-    addToLoadQueue(0, 0, 0);
+    addToLoadQueue(0, 0);
 
     // Generate initial spawn point at chunk (0,0)
     spawnPoint = findSuitableSpawnPoint(0, 0);
@@ -419,9 +417,9 @@ function updateAdjacentChunks(chunkX, chunkZ) {
 }
 
 const PRIORITY_BANDS = [
-    {distance: 2, chunksPerFrame: 5},    // Immediate area
-    {distance: 4, chunksPerFrame: 3},    // Near area
-    {distance: RENDER_DISTANCE * 2, chunksPerFrame: 2} // Far area
+    { distance: 2, chunksPerFrame: 5 },    // Immediate area
+    { distance: 4, chunksPerFrame: 3 },    // Near area
+    { distance: RENDER_DISTANCE * 2, chunksPerFrame: 2 } // Far area
 ];
 
 function addToLoadQueue(x, z) {
@@ -438,7 +436,7 @@ function addToLoadQueue(x, z) {
     priority = priority === -1 ? PRIORITY_BANDS.length : priority;
 
     // Store in simple array with priority
-    chunkLoadQueue.push({x, z, priority});
+    chunkLoadQueue.push({ x, z, priority });
     queuedChunks.add(chunkKey);
 }
 
@@ -464,52 +462,64 @@ function processChunkQueue() {
     }
 
     // Process remesh queue
-    remeshQueue.forEach(chunkKey => {
+    const entriesToProcess = [...remeshQueue]; // Create a copy of the queue to avoid modification during iteration
+    remeshQueue.clear(); // Clear the queue immediately to prevent double-processing
+
+    for (const chunkKey of entriesToProcess) {
         const [x, z] = chunkKey.split(',').map(Number);
+
+        // Skip if chunk data is no longer available
         if (!chunks[chunkKey]) {
-            remeshQueue.delete(chunkKey);
-            return;
+            continue;
         }
-    
+
         // Add adjacency check to prevent unnecessary remeshing
-        const isEdgeChunk = 
+        const isEdgeChunk =
             x === currentPlayerChunkX - RENDER_DISTANCE ||
             x === currentPlayerChunkX + RENDER_DISTANCE ||
             z === currentPlayerChunkZ - RENDER_DISTANCE ||
             z === currentPlayerChunkZ + RENDER_DISTANCE;
-    
+
         if (!isEdgeChunk) {
             // Check if all neighbors are loaded
             const neighborsLoaded = [[1, 0], [-1, 0], [0, 1], [0, -1]].every(([dx, dz]) => {
                 const neighborKey = `${x + dx},${z + dz}`;
                 return chunks[neighborKey] && chunkStates[neighborKey] === CHUNK_LOADED;
             });
-    
-            if (!neighborsLoaded) return;
+
+            // Skip if neighbors aren't loaded
+            if (!neighborsLoaded) {
+                continue;
+            }
         }
-    
+
+        // Start profiling for mesh generation
         profiler.startTimer('meshGeneration');
+
+        // Clone chunk data for transfer
         const chunkData = chunks[chunkKey];
         const clonedChunkData = new Int8Array(chunkData).buffer;
-    
+
+        // Collect adjacent chunks
         const adjacentChunks = {};
+        const transferList = [clonedChunkData]; // Start with the main chunk data
+
         [[1, 0], [-1, 0], [0, 1], [0, -1]].forEach(([dx, dz]) => {
             const adjChunkX = x + dx;
             const adjChunkZ = z + dz;
             const adjKey = `${adjChunkX},${adjChunkZ}`;
+
             if (chunks[adjKey]) {
                 const adjClone = new Int8Array(chunks[adjKey]).buffer;
                 adjacentChunks[adjKey] = adjClone;
+                transferList.push(adjClone); // Add to transfer list
             }
         });
-    
-        const transferList = [clonedChunkData];
-        Object.values(adjacentChunks).forEach(buffer => transferList.push(buffer));
-    
+
         // Select the next worker in the pool
         const worker = geometryWorkers[currentGeometryWorkerIndex];
         currentGeometryWorkerIndex = (currentGeometryWorkerIndex + 1) % geometryWorkers.length;
-    
+
         // Send the chunk data to the selected worker
         worker.postMessage({
             type: 'process_chunk',
@@ -519,11 +529,7 @@ function processChunkQueue() {
             adjacentChunks,
             isInitialGeneration: false
         }, transferList);
-    
-        // Remove the chunk from the remesh queue
-        remeshQueue.delete(chunkKey);
-    });
-    remeshQueue.clear();
+    }
 
     if (chunkLoadQueue.length > 0 || remeshQueue.size > 0) {
         requestAnimationFrame(processChunkQueue);
@@ -539,7 +545,7 @@ function getBlock(x, y, z) {
 
     if (!chunks[chunkKey]) {
         if (chunkStates[chunkKey] !== CHUNK_LOADING) {
-            addToLoadQueue(chunkX, chunkZ, Infinity);
+            addToLoadQueue(chunkX, chunkZ);
         }
         return 0;
     }
@@ -559,7 +565,7 @@ function setBlock(x, y, z, type) {
 
     if (!chunks[chunkKey]) {
         if (chunkStates[chunkKey] !== CHUNK_LOADING) {
-            addToLoadQueue(chunkX, chunkZ, Infinity);
+            addToLoadQueue(chunkX, chunkZ);
         }
         return;
     }
@@ -570,7 +576,7 @@ function setBlock(x, y, z, type) {
     if (y < 0 || y >= CHUNK_HEIGHT) return;
 
     chunks[chunkKey][localX + localZ * CHUNK_SIZE + y * CHUNK_SIZE * CHUNK_SIZE] = type;
-    addToLoadQueue(chunkX, chunkZ, 0);
+    addToLoadQueue(chunkX, chunkZ);
 }
 
 function updateBlock(x, y, z, newBlockType) {
@@ -587,7 +593,7 @@ function updateBlock(x, y, z, newBlockType) {
     const index = localX + localZ * CHUNK_SIZE + y * CHUNK_SIZE * CHUNK_SIZE;
     chunks[chunkKey][index] = newBlockType;
 
-    addToLoadQueue(chunkX, chunkZ, 0);
+    addToLoadQueue(chunkX, chunkZ);
     sendChunkToGeometryWorker(chunkX, chunkZ);
 
     if (localX === 0) sendChunkToGeometryWorker(chunkX - 1, chunkZ);
@@ -661,8 +667,7 @@ function cleanupChunkData(chunkKey) {
 function findSuitableSpawnPoint(chunkX, chunkZ) {
     const chunkKey = `${chunkX},${chunkZ}`;
     if (!chunks[chunkKey]) {
-        // Changed from Infinity to 0 for highest priority
-        addToLoadQueue(chunkX, chunkZ, 0);
+        addToLoadQueue(chunkX, chunkZ);
         return {
             x: chunkX * CHUNK_SIZE + CHUNK_SIZE / 2,
             y: CHUNK_HEIGHT, // Start at top
@@ -698,7 +703,6 @@ export {
     getBlock,
     chunks,
     materials,
-    blockColors,
     updateBlock,
     findSuitableSpawnPoint,
     addToLoadQueue,

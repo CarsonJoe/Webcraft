@@ -234,6 +234,7 @@ function animate() {
         waterMaterial.uniforms.fogFar.value = scene.fog.far;
         const cameraWorldPos = new THREE.Vector3();
         camera.getWorldPosition(cameraWorldPos);
+        waterMaterial.uniforms.cameraPos.value.copy(camera.position);
 
         waterMaterial.uniforms.cameraPos.value.copy(cameraWorldPos);
     }
