@@ -232,6 +232,28 @@ function animate(timestamp) {
     deltaTime = (timestamp - lastTime) / 1000;
     lastTime = timestamp;
 
+    
+    // Update light position to maintain height
+    const time = performance.now() * 0.001;
+    const radius = 100; // Circle radius
+    const height = 150; // Fixed height above ground
+    
+    directionalLight.position.set(
+        radius * Math.cos(time),  // X position
+        height,                   // Keep Y position fixed
+        radius * Math.sin(time)   // Z position
+    );
+
+    // Clamp delta time to prevent physics issues
+    deltaTime = Math.min(deltaTime, 0.033); // Max 30ms (≈30fps)
+
+    if (cloudMaterial) {
+        cloudMaterial.uniforms.time.value = performance.now() / 1000;
+        cloudMaterial.uniforms.cloudPosition.value.copy(clouds.position);
+    }
+
+    if (leavesMaterial) {
+        leavesMaterial.uniforms.time.value = performance.now() / 1000;
     // Clamp delta time to prevent physics issues
     deltaTime = Math.min(deltaTime, 0.033); // Max 30ms (≈30fps)
 
