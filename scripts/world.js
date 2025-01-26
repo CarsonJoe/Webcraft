@@ -434,7 +434,7 @@ function createChunkMeshes(chunkX, chunkZ, solidData, waterData, leavesData) {
                     float baseLight = minNightLight + (1.0 - minNightLight) * dayNightCycle;
                     
                     // Halved lighting effect
-                    vec3 adjustedColor = vColor * (baseLight * mix(0.8, 1.4, lightFactor));
+                    vec3 adjustedColor = vColor * (baseLight * mix(0.8, 1.2, lightFactor));
                     
                     // Fog calculation
                     float fogFactor = smoothstep(fogNear, fogFar, vFogDepth);

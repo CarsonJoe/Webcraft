@@ -65,7 +65,7 @@ export const MATERIAL_CONFIG = {
         isFoliage: true,
         variation: { 
             scale: 0.1, 
-            intensity: 0.15, 
+            intensity: 0.2, 
             channelBias: [0.8, 1.2, 0.7] 
         }
     },
