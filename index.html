@@ -1,5 +1,6 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -7,6 +8,7 @@
     <link rel="stylesheet" href="styles/main.css">
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 </head>
+
 <body>
     <div id="cursor"></div>
 
@@ -48,7 +50,7 @@
         </div>
     </div>
 
-    <div id="escape-menu" class="escape-menu">
+    <div id="escape-menu" class="escape-menu menu-main">
         <div class="menu-header">
             <div class="scanline"></div>
             <h2>SYSTEM MENU</h2>
@@ -66,6 +68,31 @@
         <div class="menu-footer">
             <div class="status-line">CURRENT BUILD: ALPHA-0.1.0</div>
             <div class="warning">WARNING: UNSAVED PROGRESS WILL BE TERMINATED</div>
+        </div>
+    </div>
+
+
+    <div class="escape-menu menu-settings" style="display: none;">
+        <div class="menu-header">
+            <div class="scanline"></div>
+            <h2>SYSTEM CONFIGURATION</h2>
+        </div>
+        <div class="menu-content">
+            <button id="back-btn" class="menu-btn">
+                <span class="btn-glow"></span>
+                BACK TO MAIN
+            </button>
+            <div class="setting">
+                <label for="render-dist">Render Distance</label>
+                <div class="slider-container">
+                    <input type="range" id="render-dist" min="5" max="25" value="10">
+                    <span id="render-dist-value">10</span>
+                </div>
+            </div>
+        </div>
+        <div class="menu-footer">
+            <div class="status-line">ADJUST VISUAL PARAMETERS</div>
+            <div class="warning">CHANGES APPLIED IMMEDIATELY</div>
         </div>
     </div>
 
@@ -91,4 +118,5 @@
     <script type="module" src="scripts/main.js"></script>
     <script type="module" src="scripts/lighting.js"></script>
 </body>
+
 </html>

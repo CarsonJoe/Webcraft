@@ -260,3 +260,36 @@ canvas {
     0% { transform: translateY(-100%); }
     100% { transform: translateY(100%); }
 }
+
+.menu-settings .setting {
+    margin: 20px 0;
+    color: #0f0;
+    font-family: 'Courier New', monospace;
+}
+
+.escape-menu .slider-container {
+    display: flex;
+    align-items: center;
+    gap: 15px;
+    margin-top: 10px;
+}
+
+#render-dist {
+    -webkit-appearance: none;
+    width: 200px;
+    height: 2px;
+    background: #0f0;
+}
+
+#render-dist::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    width: 12px;
+    height: 12px;
+    background: #0f0;
+    cursor: pointer;
+}
+
+#render-dist-value {
+    min-width: 30px;
+    text-align: right;
+}

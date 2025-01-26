@@ -14,6 +14,7 @@ let workerInitialized = false;
 let sceneReady = false;
 export let spawnPoint = null;
 export const collisionGeometry = new Map();
+export let currentRenderDistance = RENDER_DISTANCE;
 
 
 let lastUpdateTime = 0;
@@ -337,6 +338,21 @@ export function initWorld() {
     });
 }
 
+export function setRenderDistance(newDistance) {
+    currentRenderDistance = newDistance;
+    // Update fog settings
+    scene.fog.near = (newDistance / 24 * 100);
+    scene.fog.far = (newDistance / 4 * 100);
+    
+    // Trigger chunk update if world is initialized
+    if (initializationComplete) {
+        updateChunks({
+            x: currentPlayerChunkX * CHUNK_SIZE + CHUNK_SIZE/2,
+            z: currentPlayerChunkZ * CHUNK_SIZE + CHUNK_SIZE/2
+        });
+    }
+}
+
 function createChunkMeshes(chunkX, chunkZ, solidData, waterData, leavesData) {
     const chunkKey = `${chunkX},${chunkZ}`;
 
@@ -356,11 +372,12 @@ function createChunkMeshes(chunkX, chunkZ, solidData, waterData, leavesData) {
                 varying vec3 vColor;
                 varying float vFogDepth;
                 varying float vLightLevel;
+                attribute vec3 randNormal;
                 attribute vec2 offset;
                 uniform float time;
                 uniform float windStrength;
                 uniform vec3 sunPosition;
-        
+
                 void main() {
                     vec4 worldPosition = modelMatrix * vec4(position, 1.0);
                     
@@ -371,13 +388,19 @@ function createChunkMeshes(chunkX, chunkZ, solidData, waterData, leavesData) {
                     worldPosition.x += wind * 0.5;
                     worldPosition.z += wind * 0.3;
                     worldPosition.y += abs(wind) * 0.2;
-        
-                    // Light calculation
+
+                    // Calculate directions
                     vec3 leafWorldPos = worldPosition.xyz;
                     vec3 toSun = normalize(sunPosition - leafWorldPos);
                     vec3 toCamera = normalize(cameraPosition - leafWorldPos);
-                    vLightLevel = dot(toSun, toCamera);
-        
+                    
+                    // Combine sun and camera influence
+                    float sunEffect = dot(normalize(randNormal), toSun);
+                    float cameraEffect = dot(normalize(randNormal), toCamera);
+                    
+                    // Reduce effect intensity by half
+                    vLightLevel = (sunEffect + cameraEffect) * 0.25;
+
                     // Billboard effect
                     vec3 look = normalize(leafWorldPos - cameraPosition);
                     vec3 right = normalize(cross(vec3(0.0, 1.0, 0.0), look));
@@ -385,7 +408,7 @@ function createChunkMeshes(chunkX, chunkZ, solidData, waterData, leavesData) {
                     vec3 pos = worldPosition.xyz;
                     pos += right * offset.x * 1.36 * (1.0 + wind * 0.2);
                     pos += up * offset.y * 1.36 * (1.0 + wind * 0.1);
-        
+
                     vec4 mvPosition = viewMatrix * vec4(pos, 1.0);
                     gl_Position = projectionMatrix * mvPosition;
                     gl_Position.z -= 0.0003;
@@ -401,19 +424,19 @@ function createChunkMeshes(chunkX, chunkZ, solidData, waterData, leavesData) {
                 varying vec3 vColor;
                 varying float vFogDepth;
                 varying float vLightLevel;
-        
+
                 void main() {
-                    // Lighting adjustment with day/night cycle
-                    float lightFactor = smoothstep(-0.3, 0.3, vLightLevel);
+                    // Smoother transition with reduced intensity
+                    float lightFactor = smoothstep(-0.2, 0.3, vLightLevel);
                     
-                    // Adjust base darkness based on time of day
-                    float minNightLight = 0.1;  // Minimum brightness at night
+                    // Reduced night light minimum
+                    float minNightLight = 0.25;
                     float baseLight = minNightLight + (1.0 - minNightLight) * dayNightCycle;
                     
-                    // Combine time-of-day lighting with directional lighting
-                    vec3 adjustedColor = vColor * (baseLight * mix(0.6, 1.2, lightFactor));
-        
-                    // Fog application
+                    // Halved lighting effect
+                    vec3 adjustedColor = vColor * (baseLight * mix(0.8, 1.4, lightFactor));
+                    
+                    // Fog calculation
                     float fogFactor = smoothstep(fogNear, fogFar, vFogDepth);
                     gl_FragColor = vec4(mix(adjustedColor, fogColor, fogFactor), 1.0);
                 }
@@ -470,10 +493,40 @@ function createChunkMeshes(chunkX, chunkZ, solidData, waterData, leavesData) {
     // Create leaves mesh if data exists
     if (leavesData?.positions?.length > 0) {
         const leavesGeometry = new THREE.BufferGeometry();
+
+        // Existing attributes
         leavesGeometry.setAttribute('position', new THREE.BufferAttribute(leavesData.positions, 3));
         leavesGeometry.setAttribute('offset', new THREE.BufferAttribute(leavesData.offsets, 2));
         leavesGeometry.setAttribute('color', new THREE.BufferAttribute(leavesData.colors, 3));
         leavesGeometry.setIndex(new THREE.BufferAttribute(leavesData.indices, 1));
+
+        // Generate random normals for leaves (new code)
+        const numLeaves = leavesData.offsets.length / 2; // Assuming 2 components per offset
+        const randNormals = new Float32Array(numLeaves * 4 * 3); // 4 vertices per leaf, 3 components
+
+        for (let i = 0; i < numLeaves; i++) {
+            // Generate random normal for this leaf
+            const theta = Math.random() * Math.PI * 2;
+            const phi = Math.random() * Math.PI / 2;
+            const nx = Math.sin(phi) * Math.cos(theta);
+            const ny = Math.sin(phi) * Math.sin(theta);
+            const nz = Math.cos(phi);
+
+            // Apply same normal to all 4 vertices of the leaf quad
+            for (let v = 0; v < 4; v++) {
+                const idx = (i * 4 + v) * 3;
+                randNormals[idx] = nx;
+                randNormals[idx + 1] = ny;
+                randNormals[idx + 2] = nz;
+            }
+        }
+
+        // Add random normals attribute
+        leavesGeometry.setAttribute(
+            'randNormal',
+            new THREE.BufferAttribute(randNormals, 3)
+        );
+
         leavesMesh = new THREE.Mesh(leavesGeometry, leavesMaterial);
         leavesMesh.frustumCulled = false;
         leavesMesh.renderOrder = 1;
@@ -561,7 +614,7 @@ function updateAdjacentChunks(chunkX, chunkZ) {
 const PRIORITY_BANDS = [
     { distance: 2, chunksPerFrame: 5 },    // Immediate area
     { distance: 4, chunksPerFrame: 3 },    // Near area
-    { distance: RENDER_DISTANCE * 2, chunksPerFrame: 2 } // Far area
+    { distance: currentRenderDistance * 2, chunksPerFrame: 2 } // Far area
 ];
 
 function addToLoadQueue(x, z) {
@@ -571,7 +624,7 @@ function addToLoadQueue(x, z) {
     const distance = dx + dz; // Manhattan distance
 
     // Skip if out of bounds or already queued
-    if (distance > RENDER_DISTANCE * 2 + 1 || queuedChunks.has(chunkKey)) return;
+    if (distance > currentRenderDistance * 2 + 1 || queuedChunks.has(chunkKey)) return;
 
     // Assign priority band
     let priority = PRIORITY_BANDS.findIndex(b => distance <= b.distance);
@@ -625,10 +678,10 @@ function processChunkQueue() {
 
         // Add adjacency check to prevent unnecessary remeshing
         const isEdgeChunk =
-            x === currentPlayerChunkX - RENDER_DISTANCE ||
-            x === currentPlayerChunkX + RENDER_DISTANCE ||
-            z === currentPlayerChunkZ - RENDER_DISTANCE ||
-            z === currentPlayerChunkZ + RENDER_DISTANCE;
+            x === currentPlayerChunkX - currentRenderDistance ||
+            x === currentPlayerChunkX + currentRenderDistance ||
+            z === currentPlayerChunkZ - currentRenderDistance ||
+            z === currentPlayerChunkZ + currentRenderDistance;
 
         if (!isEdgeChunk) {
             // Check if all neighbors are loaded
@@ -758,7 +811,7 @@ function updateChunks(playerPosition) {
     currentPlayerChunkZ = Math.floor(playerPosition.z / CHUNK_SIZE);
 
     const chunksToKeep = new Set();
-    const buffer = RENDER_DISTANCE + 1;
+    const buffer = currentRenderDistance + 1;
 
     // First pass: Collect all chunks in rectangular area
     const chunksToCheck = [];

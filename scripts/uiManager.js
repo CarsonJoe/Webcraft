@@ -1,14 +1,20 @@
-// uiManager.js
-export const UIManager = (function() {
+import { setRenderDistance, currentRenderDistance } from './world.js';
+
+export const UIManager = (function () {
     let canvas = null;
     let escapeMenu;
     let isMenuOpen = true;
     let isIntentionalStateChange = false;
+    let currentMenu = null;
+
 
     function init() {
         canvas = document.querySelector('canvas');
         escapeMenu = document.getElementById('escape-menu');
-        escapeMenu.style.display = 'block';
+
+        // Initialize current menu state
+        currentMenu = escapeMenu;  // Use the escape-menu element directly
+        currentMenu.style.display = 'block';
 
         setupEventListeners();
         setupPointerLock();
@@ -30,6 +36,49 @@ export const UIManager = (function() {
                 toggleEscapeMenu(!isMenuOpen);
             }
         });
+
+        // Settings button
+        document.getElementById('settings-btn').addEventListener('click', () => {
+            switchMenu(document.querySelector('.menu-settings'));
+        });
+
+        // Back button
+        document.getElementById('back-btn').addEventListener('click', () => {
+            switchMenu(document.querySelector('.menu-main'));
+        });
+
+
+        // Render distance slider
+        const renderDistSlider = document.getElementById('render-dist');
+        const renderDistValue = document.getElementById('render-dist-value');
+
+        // Initialize with current value
+        renderDistSlider.value = currentRenderDistance;
+        renderDistValue.textContent = currentRenderDistance;
+
+        renderDistSlider.addEventListener('input', (e) => {
+            const value = e.target.value;
+            renderDistValue.textContent = value;
+            setRenderDistance(parseInt(value));
+        });
+    }
+
+    function switchMenu(newMenu) {
+        if (!currentMenu || !newMenu) return;
+
+        // Animate out current menu
+        currentMenu.classList.add('exit');
+        currentMenu.classList.remove('active');
+
+        setTimeout(() => {
+            currentMenu.style.display = 'none';
+            currentMenu = newMenu;
+            currentMenu.style.display = 'block';
+
+            // Animate in new menu
+            currentMenu.classList.remove('exit');
+            currentMenu.classList.add('active');
+        }, 300);
     }
 
     function setupPointerLock() {
@@ -41,6 +90,7 @@ export const UIManager = (function() {
                 if (!isIntentionalStateChange) {
                     isMenuOpen = true;
                     escapeMenu.style.display = 'block';
+                    switchMenu(document.querySelector('.menu-main'));
                 }
             }
         });
@@ -53,24 +103,33 @@ export const UIManager = (function() {
         } else {
             isMenuOpen = !isMenuOpen;
         }
-    
+
         isIntentionalStateChange = true;
-        escapeMenu.style.display = isMenuOpen ? 'block' : 'none';
-    
+
         if (isMenuOpen) {
+            // Opening animation
+            escapeMenu.classList.remove('exit');
+            escapeMenu.classList.add('active');
             document.exitPointerLock();
         } else {
-            requestPointerLockWithRetry();
+            // Closing animation
+            escapeMenu.classList.add('exit');
+            escapeMenu.classList.remove('active');
+
+            // Wait for animation to complete before hiding
+            setTimeout(() => {
+                requestPointerLockWithRetry();
+            }, 300);
         }
-        
+
         setTimeout(() => {
             isIntentionalStateChange = false;
-        }, 100);
+        }, 400);
     }
 
     function requestPointerLockWithRetry() {
         if (document.pointerLockElement === canvas) return;
-    
+
         canvas.requestPointerLock()
             .catch(error => {
                 console.log('Pointer lock failed, retrying...', error);

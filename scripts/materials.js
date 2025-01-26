@@ -10,7 +10,7 @@ export const MATERIAL_CONFIG = {
         color: 0x6cc66c,
         variation: { 
             scale: 0.2, 
-            intensity: 0.06, 
+            intensity: 0.1, 
             channelBias: [0.9, 1.1, 0.9] 
         }
     },
@@ -65,7 +65,7 @@ export const MATERIAL_CONFIG = {
         isFoliage: true,
         variation: { 
             scale: 0.1, 
-            intensity: 0.2, 
+            intensity: 0.15, 
             channelBias: [0.8, 1.2, 0.7] 
         }
     },
