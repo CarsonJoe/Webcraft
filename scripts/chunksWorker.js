@@ -355,9 +355,9 @@ function generateChunkFeatures(chunkX, chunkZ) {
     return features;
 }
 
-function generateLargeTree(chunk, chunkX, chunkZ, worldX, worldZ, baseHeight, scale = 1.5) {
+function generateLargeTree(chunk, chunkX, chunkZ, worldX, worldZ, baseHeight, scale = 1.0) {
     // Calculate scaled tree dimensions
-    const unscaledHeight = Math.floor(Math.random() * 20) + 15;
+    const unscaledHeight = Math.floor(Math.random() * 40) + 15;
     const treeHeight = Math.max(1, Math.floor(unscaledHeight * scale));
     const trunkHeight = Math.floor(treeHeight * 0.7);
     const leafRadius = Math.floor(treeHeight * 0.4) + Math.floor(2 * scale);

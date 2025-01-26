@@ -3,6 +3,9 @@ import { getBlock, updateBlock, chunks, addToLoadQueue, spawnPoint } from "./wor
 import { chunkMeshes } from "./renderer.js";
 import { UIManager } from "./uiManager.js";
 
+import { getMaterial } from './materials.js';
+
+
 // Player module
 const Player = (function () {
     // Player constants
@@ -110,30 +113,31 @@ const Player = (function () {
 
     function canPlaceBlockAt(x, y, z) {
         if (y < 0 || y >= CHUNK_HEIGHT) return false;
-
-        // Check if the block is inside or too close to the player
+    
+        // Check player collision using material properties
         const playerPos = yawObject.position;
         const dx = Math.abs(x - playerPos.x);
         const dy = Math.abs(y - playerPos.y);
         const dz = Math.abs(z - playerPos.z);
-
+    
         if (dx < PLAYER_WIDTH / 2 && dy < PLAYER_HEIGHT && dz < PLAYER_WIDTH / 2) {
             return false;
         }
-
-        // Check surrounding blocks
+    
+        // Check adjacent blocks using material properties
         for (let ox = -1; ox <= 1; ox++) {
             for (let oy = -1; oy <= 1; oy++) {
                 for (let oz = -1; oz <= 1; oz++) {
-                    if (ox === 0 && oy === 0 && oz === 0) continue; // Skip the block itself
-                    if (getBlock(x + ox, y + oy, z + oz) !== 0) {
-                        return true; // If there's at least one non-air block adjacent, we can place here
+                    if (ox === 0 && oy === 0 && oz === 0) continue;
+                    const blockType = getBlock(x + ox, y + oy, z + oz);
+                    const material = getMaterial(blockType);
+                    if (!material.isTransparent) {
+                        return true;
                     }
                 }
             }
         }
-
-        return false; // Can't place if floating in air
+        return false;
     }
 
     function onKeyDown(event) {
@@ -295,19 +299,22 @@ const Player = (function () {
         const maxY = y + PLAYER_HEIGHT;
         const minZ = z - HALF_WIDTH;
         const maxZ = z + HALF_WIDTH;
-
+    
         const startX = Math.floor(minX);
         const endX = Math.floor(maxX);
         const startY = Math.floor(minY);
         const endY = Math.floor(maxY);
         const startZ = Math.floor(minZ);
         const endZ = Math.floor(maxZ);
-
+    
         for (let bx = startX; bx <= endX; bx++) {
             for (let bz = startZ; bz <= endZ; bz++) {
                 for (let by = startY; by <= endY; by++) {
                     const blockType = getBlockGlobal(bx, by, bz);
-                    if (blockType !== 0 && blockType !== 5 && blockType !== 7 && blockType !== 10 && blockType !== 11 && blockType !== 12 && blockType !== 13) {
+                    const material = getMaterial(blockType);
+                    
+                    // Collide with solid, non-transparent blocks
+                    if (!material.isTransparent && !material.isLiquid) {
                         return true; // Collision detected
                     }
                 }
@@ -318,7 +325,8 @@ const Player = (function () {
 
     function checkWaterCollision(x, y, z) {
         const blockType = getBlock(Math.floor(x), Math.floor(y), Math.floor(z));
-        return blockType === 5; // 5 is the water block type
+        const material = getMaterial(blockType);
+        return material.isLiquid;
     }
 
     function checkInLeaves() {
@@ -329,21 +337,22 @@ const Player = (function () {
         const maxY = pos.y + PLAYER_HEIGHT;
         const minZ = pos.z - HALF_WIDTH;
         const maxZ = pos.z + HALF_WIDTH;
-
-        let leafCount = 0;
-
+    
+        let foliageCount = 0;
+    
         for (let x = Math.floor(minX); x <= Math.floor(maxX); x++) {
             for (let y = Math.floor(minY); y <= Math.floor(maxY); y++) {
                 for (let z = Math.floor(minZ); z <= Math.floor(maxZ); z++) {
                     const blockType = getBlockGlobal(x, y, z);
-                    if (blockType === 7) { // Leaves are block type 7
-                        leafCount++;
+                    const material = getMaterial(blockType);
+                    if (material.isFoliage) {
+                        foliageCount++;
                     }
                 }
             }
         }
-
-        return leafCount;
+    
+        return foliageCount;
     }
 
     function getPosition() {

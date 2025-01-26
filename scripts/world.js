@@ -1,5 +1,7 @@
 import { CHUNK_SIZE, CHUNK_HEIGHT, WATER_LEVEL, RENDER_DISTANCE } from './constants.js';
 import { chunkMeshes, removeChunkGeometry, scene } from './renderer.js';
+import { MATERIAL_CONFIG } from './materials.js';
+
 
 // Chunk states and initialization flags
 const CHUNK_LOADING = 1;
@@ -23,7 +25,6 @@ const chunkStates = {};
 const queuedChunks = new Set(); // Track chunk keys like "x,z"
 let remeshQueue = new Set();
 const chunkLoadQueue = [];      // Use as a priority queue (heap)
-const blockColors = new Map();
 
 let currentPlayerChunkX = 0;
 let currentPlayerChunkZ = 0;
@@ -33,31 +34,16 @@ const MAX_CHUNKS_PER_FRAME = 50;
 let frameBudget = 16; // Start with 16ms (~60fps)
 let lastFrameTime = performance.now();
 
-// Materials definition
-const materials = {
-    0: { color: 0x000000 }, // Air
-    1: { color: 0x6cc66c }, // Grass
-    2: { color: 0x997260 }, // Dirt
-    3: { color: 0x888888 }, // Stone
-    4: { color: 0xfaf5b6 }, // Sand
-    5: { color: 0x2e4394 }, // Water
-    6: { color: 0x7b6e65 }, // Wood
-    7: { color: 0x163b16 }, // Leaves
-    8: { color: 0x3b4044 }, // Slate
-    9: { color: 0xFFFFFF },  // Limestone
-    10: { color: 0x701f16 }, // Red flower
-    11: { color: 0xb58b3f }, // Orange flower
-    12: { color: 0x755e6f }, // White flower
-    13: { color: 0x305c30 }, // Ground Grass
-};
-
 const solidMaterial = new THREE.MeshLambertMaterial({ vertexColors: true });
 export const waterMaterial = new THREE.ShaderMaterial({
     uniforms: THREE.UniformsUtils.merge([
         THREE.UniformsLib.fog, // Include fog uniforms
         {
             time: { value: 0 },
-            waterColor: { value: new THREE.Color(0x5782e6) },
+
+            waterColor: {
+                value: new THREE.Color(...MATERIAL_CONFIG[5].rgb)
+            },
             lightDirection: { value: new THREE.Vector3(1, 1, 1).normalize() },
             waveScale: { value: .2 },
             cameraPos: { value: new THREE.Vector3() },
@@ -228,6 +214,14 @@ export function initWorld() {
     const SEED = Math.random() * 1000000;
     console.log(`[World] Using seed: ${SEED}`);
 
+    // Add global error handler
+    window.addEventListener('unhandledrejection', event => {
+        console.error('Unhandled promise rejection:', event.reason);
+    });
+
+    window.addEventListener('error', event => {
+        console.error('Global error:', event.error);
+    });
 
     addToLoadQueue(0, 0, 0);
 
@@ -240,21 +234,41 @@ export function initWorld() {
 
     for (let i = 0; i < workerCount; i++) {
         const worker = new Worker(new URL('./geometryWorker.js', import.meta.url), { type: 'module' });
+
+        // Add error handling for worker
+        worker.onerror = function (error) {
+            console.error(`Geometry Worker ${i} Error:`, error);
+            console.error('Error details:', error.message, error.filename, error.lineno);
+        };
+
         worker.postMessage({
             type: 'init',
-            materials: materials,
+            materials: MATERIAL_CONFIG,
             seed: SEED
         });
 
         worker.onmessage = function (e) {
+            if (!e.data) {
+                console.error('Received empty message from geometry worker');
+                return;
+            }
+
             if (e.data.type === 'geometry_data') {
+                console.debug(`Received geometry data for chunk ${e.data.chunkX},${e.data.chunkZ}`);
                 try {
-                    if (e.data.solid.positions.length > 0 || e.data.water.positions.length > 0 || e.data.leaves.positions.length > 0) {
+                    if (e.data.solid.positions.length > 0 ||
+                        e.data.water.positions.length > 0 ||
+                        e.data.leaves.positions.length > 0) {
                         createChunkMeshes(e.data.chunkX, e.data.chunkZ, e.data.solid, e.data.water, e.data.leaves);
+                    } else {
+                        console.warn(`Empty geometry for chunk ${e.data.chunkX},${e.data.chunkZ}`);
                     }
                 } catch (error) {
                     console.error('Error processing geometry:', error);
+                    console.error('Error chunk data:', e.data);
                 }
+            } else {
+                console.warn('Unknown message type from geometry worker:', e.data.type);
             }
         };
         geometryWorkers.push(worker);
@@ -401,7 +415,7 @@ function createChunkMeshes(chunkX, chunkZ, solidData, waterData, leavesData) {
     // Remove existing meshes safely
     if (chunkMeshes[chunkKey]) {
         const { solid, water, leaves } = chunkMeshes[chunkKey];
-        
+
         // Always remove from scene if they exist
         if (solid) {
             scene.remove(solid);
@@ -469,10 +483,10 @@ function createChunkMeshes(chunkX, chunkZ, solidData, waterData, leavesData) {
     }
 
     // Update chunk meshes reference
-    chunkMeshes[chunkKey] = { 
-        solid: solidMesh || null, 
-        water: waterMesh || null, 
-        leaves: leavesMesh || null 
+    chunkMeshes[chunkKey] = {
+        solid: solidMesh || null,
+        water: waterMesh || null,
+        leaves: leavesMesh || null
     };
 }
 
@@ -526,9 +540,9 @@ function updateAdjacentChunks(chunkX, chunkZ) {
 }
 
 const PRIORITY_BANDS = [
-    {distance: 2, chunksPerFrame: 5},    // Immediate area
-    {distance: 4, chunksPerFrame: 3},    // Near area
-    {distance: RENDER_DISTANCE * 2, chunksPerFrame: 2} // Far area
+    { distance: 2, chunksPerFrame: 5 },    // Immediate area
+    { distance: 4, chunksPerFrame: 3 },    // Near area
+    { distance: RENDER_DISTANCE * 2, chunksPerFrame: 2 } // Far area
 ];
 
 function addToLoadQueue(x, z) {
@@ -545,7 +559,7 @@ function addToLoadQueue(x, z) {
     priority = priority === -1 ? PRIORITY_BANDS.length : priority;
 
     // Store in simple array with priority
-    chunkLoadQueue.push({x, z, priority});
+    chunkLoadQueue.push({ x, z, priority });
     queuedChunks.add(chunkKey);
 }
 
@@ -589,27 +603,27 @@ function processChunkQueue() {
             remeshQueue.delete(chunkKey);
             return;
         }
-    
+
         // Add adjacency check to prevent unnecessary remeshing
-        const isEdgeChunk = 
+        const isEdgeChunk =
             x === currentPlayerChunkX - RENDER_DISTANCE ||
             x === currentPlayerChunkX + RENDER_DISTANCE ||
             z === currentPlayerChunkZ - RENDER_DISTANCE ||
             z === currentPlayerChunkZ + RENDER_DISTANCE;
-    
+
         if (!isEdgeChunk) {
             // Check if all neighbors are loaded
             const neighborsLoaded = [[1, 0], [-1, 0], [0, 1], [0, -1]].every(([dx, dz]) => {
                 const neighborKey = `${x + dx},${z + dz}`;
                 return chunks[neighborKey] && chunkStates[neighborKey] === CHUNK_LOADED;
             });
-    
+
             if (!neighborsLoaded) return;
         }
-    
+
         const chunkData = chunks[chunkKey];
         const clonedChunkData = new Int8Array(chunkData).buffer;
-    
+
         const adjacentChunks = {};
         [[1, 0], [-1, 0], [0, 1], [0, -1]].forEach(([dx, dz]) => {
             const adjChunkX = x + dx;
@@ -620,14 +634,14 @@ function processChunkQueue() {
                 adjacentChunks[adjKey] = adjClone;
             }
         });
-    
+
         const transferList = [clonedChunkData];
         Object.values(adjacentChunks).forEach(buffer => transferList.push(buffer));
-    
+
         // Select the next worker in the pool
         const worker = geometryWorkers[currentGeometryWorkerIndex];
         currentGeometryWorkerIndex = (currentGeometryWorkerIndex + 1) % geometryWorkers.length;
-    
+
         // Send the chunk data to the selected worker
         worker.postMessage({
             type: 'process_chunk',
@@ -637,7 +651,7 @@ function processChunkQueue() {
             adjacentChunks,
             isInitialGeneration: false
         }, transferList);
-    
+
         // Remove the chunk from the remesh queue
         remeshQueue.delete(chunkKey);
     });
@@ -813,8 +827,6 @@ export {
     setBlock,
     getBlock,
     chunks,
-    materials,
-    blockColors,
     updateBlock,
     findSuitableSpawnPoint,
     addToLoadQueue,

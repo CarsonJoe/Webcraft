@@ -20,10 +20,9 @@ function fastVariation(x, y, z) {
 }
 
 function getBlockVariation(worldX, y, worldZ, blockType) {
-    const config = VARIATION_CONFIG[blockType] || {};
+    const config = materials[blockType]?.variation || {};
     if (!config.scale) return [1, 1, 1];
 
-    // Get unique variation per channel
     const variations = [
         fastVariation(
             Math.floor(worldX / config.scale),
@@ -302,9 +301,10 @@ function generateGeometry(chunkX, chunkZ, chunkData, adjacentChunks) {
                 }
 
 
-                const isWater = blockType === 5;
-                const isFoliage = (blockType === 7 || blockType === 10 || blockType === 11 || blockType === 12 || blockType === 13);
-                const baseColor = hexToRGB(materials[blockType].color);
+                const material = materials[blockType] || {};
+                const isWater = material.isLiquid || false;
+                const isFoliage = material.isFoliage || false;
+                const baseColor = material.rgb || [1, 1, 1];
                 const colorMultipliers = getBlockVariation(
                     chunkX * CHUNK_SIZE + x,
                     y,
@@ -312,7 +312,7 @@ function generateGeometry(chunkX, chunkZ, chunkData, adjacentChunks) {
                     blockType
                 );
                 const finalColor = baseColor.map((c, i) => Math.min(1, Math.max(0, c * colorMultipliers[i])));
-
+                
                 if (isFoliage) {
                     const cx = x + 0.5;
                     const cy = y + 0.5;
