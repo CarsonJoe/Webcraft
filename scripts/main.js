@@ -2,8 +2,9 @@ import Player from './player.js';
 import { CHUNK_HEIGHT } from './constants.js';
 import { updateChunks, setBlock, getBlock } from './world.js';
 import { initWorld, notifySceneReady, initializationComplete, leavesMaterial } from './world.js';
-import { createSkybox, initRenderer, render, chunkMeshes } from './renderer.js';
+import { createSkybox, initRenderer, render, updateFog } from './renderer.js';
 import { UIManager } from './uiManager.js';
+
 
 // Set up the scene, camera, and renderer
 const scene = new THREE.Scene();
@@ -18,16 +19,38 @@ createSkybox(scene, renderer);
 
 
 let lastTime = 0;
-let deltaTime = 0;
+let maxOrbitHeight = 60;
 
 // Add ambient light
-const ambientLight = new THREE.AmbientLight(0x404050);
-scene.add(ambientLight);
+const hemiLight = new THREE.HemisphereLight(0xffffff, 0xffffff, 2);
+hemiLight.color.setHSL(0.6, 1, 0.6);
+hemiLight.groundColor.setHSL(0.095, 1, 0.75);
+hemiLight.position.set(0, 50, 0);
+scene.add(hemiLight);
 
 // Add directional light
-const directionalLight = new THREE.DirectionalLight(0xffffff, 0.5);
-directionalLight.position.set(1, 1, 1);
-scene.add(directionalLight);
+const sun = new THREE.DirectionalLight(0xffffff, 0.5);
+sun.position.set(100, 100, 100);
+scene.add(sun);
+
+sun.castShadow = true;
+
+sun.shadow.mapSize.width = 2048;
+sun.shadow.mapSize.height = 2048;
+sun.shadow.camera.near = 10;
+sun.shadow.camera.far = 500;
+sun.shadow.camera.left = -200;
+sun.shadow.camera.right = 200;
+sun.shadow.camera.top = 200;
+sun.shadow.camera.bottom = -200;
+
+// const lightHelper = new THREE.DirectionalLightHelper(sun, 5);
+// scene.add(lightHelper);
+
+// Add directional light target
+const lightTarget = new THREE.Object3D();
+scene.add(lightTarget);
+sun.target = lightTarget;
 
 // Cloud setup
 import SimplexNoise from 'https://cdn.jsdelivr.net/npm/simplex-noise@3.0.0/+esm';
@@ -85,7 +108,7 @@ const cloudMaterial = new THREE.ShaderMaterial({
         time: { value: 0 },
         dayNightCycle: { value: 0.5 },
         cloudTexture: { value: cloudTexture },
-        lightDirection: { value: directionalLight.position.normalize() },
+        lightDirection: { value: sun.position.normalize() },
         cloudSpeed: { value: 0.0005 },  // Increased default speed
         cloudCover: { value: 0.9 },  // Added cloud cover parameter
         densityScale: { value: .9 }, // Adjusted default density
@@ -228,82 +251,78 @@ function animate(timestamp) {
         return;
     }
 
-    // Calculate delta time in seconds
-    deltaTime = (timestamp - lastTime) / 1000;
+    const deltaTime = (timestamp - lastTime) / 1000;
     lastTime = timestamp;
 
-    
-    // Update light position to maintain height
+    // Calculate cycle parameters
+    const cycleSpeed = 0.05; // Adjust this value to change cycle speed
     const time = performance.now() * 0.001;
-    const radius = 100; // Circle radius
-    const height = 150; // Fixed height above ground
-    
-    directionalLight.position.set(
-        radius * Math.cos(time),  // X position
-        height,                   // Keep Y position fixed
-        radius * Math.sin(time)   // Z position
-    );
+    const angle = time * cycleSpeed;
+    const playerPos = Player.getPosition();
 
-    // Clamp delta time to prevent physics issues
-    deltaTime = Math.min(deltaTime, 0.033); // Max 30ms (≈30fps)
+    // Update light target to follow player
+    lightTarget.position.copy(playerPos);
 
+    const sunPosition = calculateSunPosition(angle, playerPos, maxOrbitHeight);
+    sun.position.copy(sunPosition);
+
+
+
+    // Update light intensities
+
+    const dayNightValue = (Math.sin(angle) + 1) * 0.5;
+
+    sun.intensity = Math.max(0, Math.sin(angle)) * 0.5;
+    // Update hemispheric light to match the same cycle
+    const minLightIntensity = 0.1;  // Minimum light at night
+    const maxLightIntensity = 0.5;   // Maximum light during day
+    hemiLight.intensity = minLightIntensity + (maxLightIntensity - minLightIntensity) * dayNightValue;
+    // Update cloud dayNightCycle uniform
+    updateFog(dayNightValue);
     if (cloudMaterial) {
+
+        cloudMaterial.uniforms.dayNightCycle.value = dayNightValue;
         cloudMaterial.uniforms.time.value = performance.now() / 1000;
         cloudMaterial.uniforms.cloudPosition.value.copy(clouds.position);
     }
 
     if (leavesMaterial) {
         leavesMaterial.uniforms.time.value = performance.now() / 1000;
-    // Clamp delta time to prevent physics issues
-    deltaTime = Math.min(deltaTime, 0.033); // Max 30ms (≈30fps)
-
-    if (cloudMaterial) {
-        cloudMaterial.uniforms.time.value = performance.now() / 1000;
-        cloudMaterial.uniforms.cloudPosition.value.copy(clouds.position);
-    }
-
-    if (leavesMaterial) {
-        leavesMaterial.uniforms.time.value = performance.now() / 1000;
+        leavesMaterial.uniforms.sunPosition.value.copy(sun.position);
+        leavesMaterial.uniforms.dayNightCycle.value = dayNightValue;
     }
 
     // Update player with delta time
     Player.update(getBlock, deltaTime);
-    
+
     // Rest of the animate function remains the same...
     updateChunks(Player.getPosition());
     updateCloudPosition();
     render(scene, camera);
     profiler.endFrame();
-    // updateDebugUI();
 }
 
 animate();
 
-function updateDebugUI() {
-    const metrics = profiler.getMetrics();
-    const frameStats = [
-        `Frame: ${metrics.frame.current}ms`,
-        `Avg: ${metrics.frame.avg}ms`,
-        `Min: ${metrics.frame.min}ms`,
-        `Max: ${metrics.frame.max}ms`
-    ];
+function calculateSunPosition(angle, playerPos, maxAngleFromHorizon) {
+    // Convert max angle to radians
+    const maxAngleRad = (maxAngleFromHorizon * Math.PI) / 180;
 
-    const chunkStats = [
-        `Generated: ${metrics.chunks.generated}`,
-        `Meshed: ${metrics.chunks.meshed}`,
-        `Loaded: ${Object.keys(chunkMeshes).length}`
-    ];
+    // Calculate the orbit path
+    const horizontalRadius = 100 * Math.cos(maxAngleRad);
+    const maxHeight = 100 * Math.sin(maxAngleRad);
 
-    const memoryStats = [
-        `Geometry: ${metrics.memory.geometry}MB`,
-        `Total: ${metrics.memory.total}MB`
-    ];
+    // Calculate current position in orbit
+    const currentHeight = playerPos.y + maxHeight * Math.sin(angle);
+    const xOffset = horizontalRadius * Math.cos(angle);
+    const zOffset = horizontalRadius * Math.sin(angle);
 
-    document.getElementById('frame-stats').innerHTML = frameStats.join('<br>');
-    document.getElementById('chunk-stats').innerHTML = chunkStats.join('<br>');
-    document.getElementById('memory-stats').innerHTML = memoryStats.join('<br>');
+    return new THREE.Vector3(
+        playerPos.x + xOffset,
+        currentHeight,
+        playerPos.z + zOffset
+    );
 }
-
 
 // Handle window resizing
 window.addEventListener('resize', () => {

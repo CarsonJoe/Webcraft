@@ -137,20 +137,19 @@ export function render(scene, camera) {
     updateFPSCounter();
 }
 
-export function updateFog(timeOfDay) {
+export function updateFog(dayNightValue) {
     if (!scene.fog) return;
 
-    // Example: Adjust fog density based on time of day
-    const fogNear = 20 + Math.sin(timeOfDay * Math.PI * 2) * 10;  // Vary between 10 and 30
-    const fogFar = 500 + Math.sin(timeOfDay * Math.PI * 2) * 100;  // Vary between 400 and 600
+    // Color interpolation between day and night
+    const dayColor = new THREE.Color().setHSL(0.6, 0.5, 0.7); // Light sky blue
+    const nightColor = new THREE.Color().setHSL(0.62, 0.3, 0.05); // Dark navy blue
 
+    // Fog density parameters
+    const fogNear = 20 + (1 - dayNightValue) * 10; // 20-30 units
+    const fogFar = 300 + dayNightValue * 200; // 300-500 units
+
+    // Apply interpolated values
+    scene.fog.color.lerpColors(nightColor, dayColor, dayNightValue);
     scene.fog.near = fogNear;
     scene.fog.far = fogFar;
-
-    // Optionally, adjust fog color
-    const hue = 0.6 + Math.sin(timeOfDay * Math.PI * 2) * 0.1;  // Vary hue slightly
-    const saturation = 0.5 + Math.sin(timeOfDay * Math.PI * 2) * 0.25;  // Vary saturation
-    const lightness = 0.5 + Math.sin(timeOfDay * Math.PI * 2) * 0.25;  // Vary lightness
-
-    scene.fog.color.setHSL(hue, saturation, lightness);
 }

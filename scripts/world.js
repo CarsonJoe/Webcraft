@@ -346,70 +346,76 @@ function createChunkMeshes(chunkX, chunkZ, solidData, waterData, leavesData) {
             uniforms: THREE.UniformsUtils.merge([
                 THREE.UniformsLib.fog,
                 {
-                    time: { value: 0 }, // Add time uniform
-                    windStrength: { value: 0.5 } // Add wind strength control
+                    time: { value: 0 },
+                    windStrength: { value: 0.5 },
+                    sunPosition: { value: new THREE.Vector3() },
+                    dayNightCycle: { value: 0.5 }
                 }
             ]),
             vertexShader: `
-            varying vec3 vColor;
-            varying float vFogDepth;
-            attribute vec2 offset;
-            uniform float time;
-            uniform float windStrength;
-
-            void main() {
-                vec4 worldPosition = modelMatrix * vec4(position, 1.0);
-                
-                // Wind calculations
-                float windWave = sin(time * 2.0 + worldPosition.x * 0.5 + worldPosition.z * 0.3) * 0.3;
-                windWave += sin(time * 1.5 + worldPosition.x * 0.3) * 0.2;
-                float wind = windWave * windStrength;
-                
-                // Apply wind displacement
-                worldPosition.x += wind * 0.5;
-                worldPosition.z += wind * 0.3;
-                worldPosition.y += abs(wind) * 0.2; // Vertical movement
-                
-                // Billboard calculations
-                vec3 look = normalize(worldPosition.xyz - cameraPosition);
-                vec3 right = normalize(cross(vec3(0.0, 1.0, 0.0), look));
-                vec3 up = cross(look, right);
-                
-                // Apply scaled offset with wind influence
-                vec3 pos = worldPosition.xyz;
-                pos += right * offset.x * 1.36 * (1.0 + wind * 0.2);
-                pos += up * offset.y * 1.36 * (1.0 + wind * 0.1);
-                
-                // Transform to view space
-                vec4 mvPosition = viewMatrix * vec4(pos, 1.0);
-                gl_Position = projectionMatrix * mvPosition;
-                
-                // Depth adjustments
-                gl_Position.z -= 0.0003;
-                vFogDepth = -mvPosition.z;
-                
-                vColor = color;
-            }
-        `,
+                varying vec3 vColor;
+                varying float vFogDepth;
+                varying float vLightLevel;
+                attribute vec2 offset;
+                uniform float time;
+                uniform float windStrength;
+                uniform vec3 sunPosition;
+        
+                void main() {
+                    vec4 worldPosition = modelMatrix * vec4(position, 1.0);
+                    
+                    // Wind displacement
+                    float windWave = sin(time * 2.0 + worldPosition.x * 0.5 + worldPosition.z * 0.3) * 0.3;
+                    windWave += sin(time * 1.5 + worldPosition.x * 0.3) * 0.2;
+                    float wind = windWave * windStrength;
+                    worldPosition.x += wind * 0.5;
+                    worldPosition.z += wind * 0.3;
+                    worldPosition.y += abs(wind) * 0.2;
+        
+                    // Light calculation
+                    vec3 leafWorldPos = worldPosition.xyz;
+                    vec3 toSun = normalize(sunPosition - leafWorldPos);
+                    vec3 toCamera = normalize(cameraPosition - leafWorldPos);
+                    vLightLevel = dot(toSun, toCamera);
+        
+                    // Billboard effect
+                    vec3 look = normalize(leafWorldPos - cameraPosition);
+                    vec3 right = normalize(cross(vec3(0.0, 1.0, 0.0), look));
+                    vec3 up = cross(look, right);
+                    vec3 pos = worldPosition.xyz;
+                    pos += right * offset.x * 1.36 * (1.0 + wind * 0.2);
+                    pos += up * offset.y * 1.36 * (1.0 + wind * 0.1);
+        
+                    vec4 mvPosition = viewMatrix * vec4(pos, 1.0);
+                    gl_Position = projectionMatrix * mvPosition;
+                    gl_Position.z -= 0.0003;
+                    vFogDepth = -mvPosition.z;
+                    vColor = color;
+                }
+            `,
             fragmentShader: `
                 uniform vec3 fogColor;
                 uniform float fogNear;
                 uniform float fogFar;
-                
+                uniform float dayNightCycle;
                 varying vec3 vColor;
                 varying float vFogDepth;
-                
+                varying float vLightLevel;
+        
                 void main() {
-                    // Base color
-                    vec3 color = vColor;
+                    // Lighting adjustment with day/night cycle
+                    float lightFactor = smoothstep(-0.3, 0.3, vLightLevel);
                     
-                    // Fog calculation
+                    // Adjust base darkness based on time of day
+                    float minNightLight = 0.1;  // Minimum brightness at night
+                    float baseLight = minNightLight + (1.0 - minNightLight) * dayNightCycle;
+                    
+                    // Combine time-of-day lighting with directional lighting
+                    vec3 adjustedColor = vColor * (baseLight * mix(0.6, 1.2, lightFactor));
+        
+                    // Fog application
                     float fogFactor = smoothstep(fogNear, fogFar, vFogDepth);
-                    
-                    // Apply fog
-                    color = mix(color, fogColor, fogFactor);
-                    
-                    gl_FragColor = vec4(color, 1.0);
+                    gl_FragColor = vec4(mix(adjustedColor, fogColor, fogFactor), 1.0);
                 }
             `,
             transparent: false,
