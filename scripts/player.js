@@ -11,7 +11,7 @@ const Player = (function () {
     // Player constants
     const NORMAL_SPEED = 12; // Units per second
     const SPRINT_SPEED = NORMAL_SPEED * 1.4;
-    const SWIM_SPEED = 1.5; // Units per second
+    const SWIM_SPEED = 10; // Units per second
     const JUMP_FORCE = 12; // Units per second
     const GRAVITY = 20; // Units per second squared
     const WATER_GRAVITY = 4; // Units per second squared
@@ -214,7 +214,7 @@ const Player = (function () {
 
             if (keys['Space']) {
                 if (isSwimming) {
-                    velocity.y = SWIM_SPEED; // Swim upwards
+                    velocity.y = SWIM_SPEED / 5; // Swim upwards
                 } else if (canJump) {
                     velocity.y = JUMP_FORCE;
                     canJump = false;
@@ -232,13 +232,13 @@ const Player = (function () {
             yawObject.position.y += velocity.y * deltaTime;
 
             // Check the number of intersecting leaf blocks
-            const leafCount = checkInLeaves();
+            const speedInhibitors = inhibitors();
 
             // Adjust movement speed based on how many leaves are intersected
             let currentSpeed = isSwimming ? SWIM_SPEED : (isSprinting ? SPRINT_SPEED : NORMAL_SPEED);
 
             // Each leaf reduces speed by 5% (up to 50% reduction)
-            const speedMultiplier = 1 - Math.min(leafCount * 0.05, 0.5);
+            const speedMultiplier = 1 - Math.min(speedInhibitors * 0.05, 0.5);
             currentSpeed *= speedMultiplier;
 
             // Horizontal movement and collision detection with auto-jump
@@ -329,7 +329,7 @@ const Player = (function () {
         return material.isLiquid;
     }
 
-    function checkInLeaves() {
+    function inhibitors() {
         const pos = yawObject.position;
         const minX = pos.x - HALF_WIDTH;
         const maxX = pos.x + HALF_WIDTH;
@@ -345,7 +345,7 @@ const Player = (function () {
                 for (let z = Math.floor(minZ); z <= Math.floor(maxZ); z++) {
                     const blockType = getBlockGlobal(x, y, z);
                     const material = getMaterial(blockType);
-                    if (material.isFoliage) {
+                    if (material.slowPlayer) {
                         foliageCount++;
                     }
                 }

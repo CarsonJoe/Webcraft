@@ -1,7 +1,7 @@
 import Player from './player.js';
 import { CHUNK_HEIGHT } from './constants.js';
 import { updateChunks, setBlock, getBlock } from './world.js';
-import { initWorld, notifySceneReady, initializationComplete } from './world.js';
+import { initWorld, notifySceneReady, initializationComplete, leavesMaterial } from './world.js';
 import { createSkybox, initRenderer, render, chunkMeshes } from './renderer.js';
 import { UIManager } from './uiManager.js';
 
@@ -238,6 +238,10 @@ function animate(timestamp) {
     if (cloudMaterial) {
         cloudMaterial.uniforms.time.value = performance.now() / 1000;
         cloudMaterial.uniforms.cloudPosition.value.copy(clouds.position);
+    }
+
+    if (leavesMaterial) {
+        leavesMaterial.uniforms.time.value = performance.now() / 1000;
     }
 
     // Update player with delta time

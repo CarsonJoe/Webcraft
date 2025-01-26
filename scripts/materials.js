@@ -44,6 +44,7 @@ export const MATERIAL_CONFIG = {
     // Water
     5: { 
         color: 0x5782e6,
+        slowPlayer: true,
         isTransparent: true,
         isLiquid: true
     },
@@ -60,6 +61,7 @@ export const MATERIAL_CONFIG = {
     7: { 
         color: 0x163b16,
         isTransparent: true,
+        slowPlayer: true,
         isFoliage: true,
         variation: { 
             scale: 0.1, 
