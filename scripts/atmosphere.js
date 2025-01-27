@@ -1,3 +1,6 @@
+
+import { DAY_LENGTH } from './constants.js';
+
 export class Atmosphere {
     static PLANETARY_CONFIGS = {
         EARTH: {
@@ -288,7 +291,7 @@ export class Atmosphere {
 
         // Visualization parameters
         this.orbitRadius = 50;
-        this.timeScale = .01; // default to ~.01
+        this.timeScale = .012 / DAY_LENGTH; // default to ~.01
         this.cycleSpeed = 0.02;
 
         // Position tracking
@@ -459,7 +462,7 @@ export class Atmosphere {
                     // Transition thresholds
                     const float nightThreshold = -0.4;
                     const float sunsetStart = 0.1;
-                    const float sunsetEnd = 0.1; // actually sunset start
+                    const float sunsetEnd = 0.2; // actually sunset start
                     const float dayThreshold = 0.5;
 
                     // Base colors with scattering
@@ -685,82 +688,85 @@ export class Atmosphere {
                 sizeScale: { value: this.config.starSizeScale },
                 time: { value: 0 },
                 sunDirection: { value: new THREE.Vector3() },
-                fadeRange: { value: 0.9 },
+                fadeRange: { value: 1.0 }, // Increased from 0.9 to 1.0
                 twinkleSpeed: { value: this.config.starTwinkleSpeed },
                 pixelRatio: { value: window.devicePixelRatio },
-                minSizeThreshold: { value: 5.0 } // Add new uniform for size threshold
+                minSizeThreshold: { value: 5.0 }
             },
             vertexShader: `
-        attribute float size;
-        attribute vec3 color;
-        attribute float random;
-        varying vec3 vColor;
-        varying float vAlpha;
-        varying float vSize;
-
-        uniform float density;
-        uniform float sizeScale;
-        uniform float time;
-        uniform float twinkleSpeed;
-        uniform vec3 sunDirection;
-        uniform float fadeRange;
-        uniform float pixelRatio;
-        uniform float minSizeThreshold;
-
-        void main() {
-            // Calculate the adjusted size first
-            float adjustedSize = size * sizeScale * pixelRatio;
-            
-            // Check both density and size threshold
-            if(random > density || adjustedSize < minSizeThreshold) {
-                vAlpha = 0.0;
-                vSize = 0.0;
-            } else {
-                // Calculate star brightness based on sun position
-                float sunHeight = clamp(sunDirection.y, -1.0, 1.0);
-                float nightFactor = smoothstep(0.0, fadeRange, -sunHeight);
-                
-                // Twinkle effect
-                float twinkle = sin(time * twinkleSpeed + random * 100.0) * 0.3 + 0.7;
-                
-                vColor = color * nightFactor * twinkle;
-                vAlpha = nightFactor * twinkle;
-                vSize = adjustedSize;
-            }
-
-            vec4 mvPosition = modelViewMatrix * vec4(position, 1.0);
-            gl_PointSize = vSize * (300.0 / -mvPosition.z);
-            gl_Position = projectionMatrix * mvPosition;
-        }
-    `,
+                attribute float size;
+                attribute vec3 color;
+                attribute float random;
+                varying vec3 vColor;
+                varying float vAlpha;
+                varying float vSize;
+        
+                uniform float density;
+                uniform float sizeScale;
+                uniform float time;
+                uniform float twinkleSpeed;
+                uniform vec3 sunDirection;
+                uniform float fadeRange;
+                uniform float pixelRatio;
+                uniform float minSizeThreshold;
+        
+                void main() {
+                    // Calculate adjusted size first
+                    float adjustedSize = size * sizeScale * pixelRatio;
+                    
+                    // Check both density and size threshold
+                    if(random > density || adjustedSize < minSizeThreshold) {
+                        vAlpha = 0.0;
+                        vSize = 0.0;
+                    } else {
+                        // Calculate star brightness based on sun position
+                        float sunHeight = clamp(sunDirection.y, -1.0, 1.0);
+                        float t = clamp((-sunHeight) / fadeRange, 0.0, 1.0);
+                        
+                        // Cubic smootherstep interpolation
+                        float nightFactor = t * t * t * (t * (t * 6.0 - 15.0) + 10.0);
+                        
+                        // Twinkle effect
+                        float twinkle = sin(time * twinkleSpeed + random * 100.0) * 0.3 + 0.7;
+                        
+                        vColor = color * nightFactor * twinkle;
+                        vAlpha = nightFactor * twinkle;
+                        vSize = adjustedSize;
+                    }
+        
+                    vec4 mvPosition = modelViewMatrix * vec4(position, 1.0);
+                    gl_PointSize = vSize * (300.0 / -mvPosition.z);
+                    gl_Position = projectionMatrix * mvPosition;
+                }
+            `,
             fragmentShader: `
-        varying vec3 vColor;
-        varying float vAlpha;
-        varying float vSize;
-
-        void main() {
-            // Discard if either alpha is 0 or size is 0
-            if(vAlpha <= 0.0 || vSize <= 0.0) discard;
-            
-            // Calculate distance from center with pixel-perfect coordinates
-            vec2 coord = (gl_PointCoord - 0.5) * 2.0;
-            float dist = length(coord);
-            
-            // Calculate antialiased edge
-            float radius = 0.9;
-            float smoothWidth = 1.5 / vSize;
-            float alpha = smoothstep(radius + smoothWidth, radius - smoothWidth, dist);
-            
-            // Apply star intensity falloff
-            float intensity = 1.0 - smoothstep(0.0, radius, dist);
-            intensity = pow(intensity, 1.5);
-            
-            // Combine with varying alpha
-            alpha *= vAlpha * intensity;
-            
-            gl_FragColor = vec4(vColor, alpha);
-        }
-    `,
+                varying vec3 vColor;
+                varying float vAlpha;
+                varying float vSize;
+        
+                void main() {
+                    // Discard if either alpha is 0 or size is 0
+                    if(vAlpha <= 0.0 || vSize <= 0.0) discard;
+                    
+                    // Calculate distance from center with pixel-perfect coordinates
+                    vec2 coord = (gl_PointCoord - 0.5) * 2.0;
+                    float dist = length(coord);
+                    
+                    // Calculate antialiased edge with softer parameters
+                    float radius = 0.8;
+                    float smoothWidth = 2.5 / vSize; // Increased from 1.5
+                    float alpha = smoothstep(radius + smoothWidth, radius - smoothWidth, dist);
+                    
+                    // Smoother intensity falloff
+                    float intensity = 1.0 - smoothstep(0.0, radius, dist);
+                    intensity = pow(intensity, 1.2); // Reduced exponent from 1.5
+                    
+                    // Combine with varying alpha
+                    alpha *= vAlpha * intensity;
+                    
+                    gl_FragColor = vec4(vColor, alpha);
+                }
+            `,
             transparent: true,
             depthWrite: false,
             blending: THREE.AdditiveBlending
@@ -963,7 +969,7 @@ export class Atmosphere {
     
             // Starlight settings
             const starlightColor = new THREE.Color(0.45, 0.45, 0.35);
-            const starlightIntensity = 0.08;
+            const starlightIntensity = 0.18;
             const maxAmbientIntensity = 0.4;
     
             // Convert colors to HSL with safety checks
@@ -1026,8 +1032,6 @@ export class Atmosphere {
         }
     
         if (this.materials.leaves) {
-            console.log('Ambient Color:', this.ambientColor.toArray());
-            console.log('Ambient Intensity:', this.ambientIntensity);
             
             // Verify uniform updates
             this.materials.leaves.uniforms.sunPosition.value.copy(sunDirection);

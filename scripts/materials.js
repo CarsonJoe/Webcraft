@@ -89,7 +89,7 @@ export const MATERIAL_CONFIG = {
     },
     // Red Flower
     10: { 
-        color: 0x701f16,
+        color: 0xff3924,
         isTransparent: true,
         isFoliage: true,
         variation: { 
@@ -100,7 +100,7 @@ export const MATERIAL_CONFIG = {
     },
     // Orange Flower
     11: { 
-        color: 0xe3a22d,
+        color: 0xffbd47,
         isFoliage: true,
         isTransparent: true,
         variation: { 
@@ -111,7 +111,7 @@ export const MATERIAL_CONFIG = {
     },
     // White Flower
     12: { 
-        color: 0x755e6f,
+        color: 0xedcee5,
         isFoliage: true,
         isTransparent: true,
         variation: { 
