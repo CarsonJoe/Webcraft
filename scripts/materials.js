@@ -59,13 +59,13 @@ export const MATERIAL_CONFIG = {
     },
     // Leaves
     7: { 
-        color: 0x163b16,
+        color: 0x2a6b2a,
         isTransparent: true,
         slowPlayer: true,
         isFoliage: true,
         variation: { 
             scale: 0.1, 
-            intensity: 0.2, 
+            intensity: 0.1, 
             channelBias: [0.8, 1.2, 0.7] 
         }
     },
@@ -100,7 +100,7 @@ export const MATERIAL_CONFIG = {
     },
     // Orange Flower
     11: { 
-        color: 0xb58b3f,
+        color: 0xe3a22d,
         isFoliage: true,
         isTransparent: true,
         variation: { 
@@ -122,7 +122,7 @@ export const MATERIAL_CONFIG = {
     },
     // Grass Foliage
     13: { 
-        color: 0x305c30,
+        color: 0x54d154,
         isTransparent: true,
         isFoliage: true,
         variation: { 

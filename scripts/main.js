@@ -79,21 +79,21 @@ const cloudMaterial = new THREE.ShaderMaterial({
         dayNightCycle: { value: 0.5 },
         cloudTexture: { value: cloudTexture },
         lightDirection: { value: sun.position.normalize() },
-        cloudSpeed: { value: 0.0005 },  // Increased default speed
-        cloudCover: { value: 0.9 },  // Added cloud cover parameter
-        densityScale: { value: .9 }, // Adjusted default density
-        lightIntensity: { value: .5 },
+        cloudSpeed: { value: 0.0005 },
+        cloudCover: { value: 0.9 },
+        densityScale: { value: 0.9 },
+        lightIntensity: { value: 0.5 },
         cloudPosition: { value: new THREE.Vector3() }
     },
     vertexShader: `
     varying vec2 vUv;
     varying vec3 vWorldPosition;
     void main() {
-      vUv = uv;
-      vWorldPosition = (modelMatrix * vec4(position, 1.0)).xyz;
-      gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+        vUv = uv;
+        vWorldPosition = (modelMatrix * vec4(position, 1.0)).xyz;
+        gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
     }
-  `,
+    `,
     fragmentShader: `
     uniform sampler2D cloudTexture;
     uniform float time;
@@ -125,24 +125,19 @@ const cloudMaterial = new THREE.ShaderMaterial({
     }
 
     float getCloudDensity(vec2 uv) {
-        // Frequency-based speed scaling
-        float speed1 = cloudSpeed / 0.8; // Compensate for uv * 0.8
-        float speed2 = cloudSpeed / 2.5; // Compensate for uv * 2.5
-        float speed3 = cloudSpeed / 0.3; // Compensate for uv * 0.3
+        float speed1 = cloudSpeed / 0.8;
+        float speed2 = cloudSpeed / 2.5;
+        float speed3 = cloudSpeed / 0.3;
 
         vec2 uv1 = uv * 0.8 + vec2(time * speed1, 0.0);
-        vec2 uv2 = uv * 2.5 + vec2(0.0, time * speed2 * 0.7); // Reduced vertical speed
-        vec2 uv3 = uv * 0.3 - vec2(time * speed3 * 0.3); // Slower diagonal movement
+        vec2 uv2 = uv * 2.5 + vec2(0.0, time * speed2 * 0.7);
+        vec2 uv3 = uv * 0.3 - vec2(time * speed3 * 0.3);
         
-        // Cloud layers
         float baseClouds = fbm(uv1);
         float details = fbm(uv2) * 0.3;
         float largeScale = smoothstep(0.3, 0.8, fbm(uv3)) * 0.5;
         
-        // Combine layers and apply density scale
         float density = (baseClouds * largeScale + details) * densityScale;
-        
-        // Cloud cover control
         float coverageThreshold = mix(0.3, -0.2, cloudCover);
         density = smoothstep(coverageThreshold, coverageThreshold + 0.5, density);
         
@@ -153,29 +148,51 @@ const cloudMaterial = new THREE.ShaderMaterial({
         vec2 uv = vUv * 2.0;
         float density = getCloudDensity(uv);
         
-        // Lighting calculations
+        // Enhanced lighting calculations
         vec3 normal = vec3(0.0, 1.0, 0.0);
         float lightIntensity = dot(normal, lightDirection) * 0.5 + 0.5;
         
-        // Color variations
-        vec3 baseColor = mix(vec3(0.4, 0.45, 0.5), vec3(1.0, 0.98, 0.95), density);
-        vec3 shadedColor = mix(baseColor * 0.7, baseColor * 1.2, lightIntensity);
-        vec3 ambientColor = mix(vec3(0.25, 0.3, 0.4), vec3(0.5, 0.6, 0.8), dayNightCycle);
+        // Night-adjusted color variations
+        vec3 dayColor = mix(vec3(0.4, 0.45, 0.5), vec3(1.0, 0.98, 0.95), density);
+        vec3 nightColor = vec3(0.15, 0.18, 0.25); // Darker night colors
+        vec3 baseColor = mix(nightColor, dayColor, dayNightCycle);
         
-        // Final color and opacity
-        vec3 finalColor = mix(ambientColor, shadedColor, density * 0.8);
-        float alpha = smoothstep(0.1, 0.9, density) * 0.8;
-        alpha *= mix(0.8, 1.2, fbm(uv * 5.0 + time * 0.1));
+        // Adjusted ambient lighting for night
+        float nightAmbient = 0.15; // Reduced night ambient light
+        float dayAmbient = 1.0;
+        float ambientStrength = mix(nightAmbient, dayAmbient, dayNightCycle);
         
-        // Calculate edge fade
+        // Enhanced shading with day/night consideration
+        vec3 shadedColor = mix(
+            baseColor * max(0.3, ambientStrength * 0.7), 
+            baseColor * max(0.4, ambientStrength * 1.2), 
+            lightIntensity
+        );
+        
+        // Night sky ambient color adjustment
+        vec3 nightSkyColor = vec3(0.1, 0.12, 0.18);
+        vec3 daySkyColor = vec3(0.5, 0.6, 0.8);
+        vec3 ambientColor = mix(nightSkyColor, daySkyColor, dayNightCycle);
+        
+        // Final color blending with reduced night visibility
+        vec3 finalColor = mix(ambientColor, shadedColor, density * ambientStrength);
+        
+        // Adjusted alpha for night visibility
+        float baseAlpha = smoothstep(0.1, 0.9, density) * 0.8;
+        baseAlpha *= mix(0.8, 1.2, fbm(uv * 5.0 + time * 0.1));
+        
+        // Distance fade
         vec2 localPos = vWorldPosition.xz - cloudPosition.xz;
         float distanceFromCenter = length(localPos) / 1500.0;
         float edgeFade = 1.0 - smoothstep(0.1, 1.0, distanceFromCenter);
-        alpha *= edgeFade;
-
-        gl_FragColor = vec4(finalColor, alpha * 0.85);
+        
+        // Final alpha with night reduction
+        float nightAlphaReduction = mix(0.3, 1.0, dayNightCycle); // Clouds are 30% as visible at night
+        float finalAlpha = baseAlpha * edgeFade * nightAlphaReduction * 0.85;
+        
+        gl_FragColor = vec4(finalColor, finalAlpha);
     }
-  `,
+    `,
     transparent: true,
     depthWrite: false,
     side: THREE.DoubleSide
@@ -187,7 +204,7 @@ cloudGeometry.rotateX(-Math.PI / 2);
 const clouds = new THREE.Mesh(cloudGeometry, cloudMaterial);
 clouds.position.y = 180;
 clouds.renderOrder = -1; // Render before other objects
-// scene.add(clouds);
+scene.add(clouds);
 
 function updateCloudPosition() {
     const playerPos = Player.getPosition();
@@ -208,6 +225,11 @@ document.addEventListener('contextmenu', (event) => event.preventDefault());
 
 // Animation loop
 let gameStarted = false;
+
+console.log("Registering materials:", {
+    hasLeaves: !!leavesMaterial,
+    leavesUniforms: leavesMaterial?.uniforms
+});
 
 atmosphere.registerMaterials({
     clouds: cloudMaterial,

@@ -24,10 +24,13 @@ export class Atmosphere {
             customShaderEffects: {
                 colorShift: 0,
                 wavyDistortion: 0,
-                glowIntensity: 1.0
-            }
+            },
+
+            starDensity: 0.5,
+            starSizeScale: 5.0,
+            starTwinkleSpeed: 0.2,
         },
-        
+
         EXOTIC_WORLD: {
             axialTilt: 45,
             orbitalPeriod: 4,
@@ -53,8 +56,220 @@ export class Atmosphere {
             customShaderEffects: {
                 colorShift: 1.0,
                 wavyDistortion: 10.0,
-                glowIntensity: 20
-            }
+            },
+
+            starDensity: 1.0,
+            starSizeScale: 2.0,
+            starTwinkleSpeed: 0.5,
+        },
+        MERCURY: {
+            axialTilt: 0.034,
+            orbitalPeriod: 87.97,
+            rotationPeriod: 58.646,
+            orbitalEccentricity: 0.2056,
+            atmosphereHeight: 0, // Virtually no atmosphere
+            meanRadius: 2439.7,
+            sunSize: 15, // Appears larger due to proximity
+            atmosphereColor: {
+                day: new THREE.Color(0x000000), // No real atmosphere
+                sunset: new THREE.Color(0x000000),
+                night: new THREE.Color(0x000000)
+            },
+            sunsetThreshold: 0.1,
+            sunColor: new THREE.Color(0xFFFFCC), // Brighter, whiter sun due to proximity
+            fogColor: {
+                day: new THREE.Color().setHSL(0, 0, 0),
+                night: new THREE.Color().setHSL(0, 0, 0)
+            },
+            atmosphericDensity: 0,
+            atmosphericTurbulence: 0,
+            customShaderEffects: {
+                colorShift: 0,
+                wavyDistortion: 0,
+            },
+            starDensity: 1.0,
+            starSizeScale: 6.0, // Stars appear brighter due to no atmosphere
+            starTwinkleSpeed: 0,
+        },
+
+        VENUS: {
+            axialTilt: 177.4,
+            orbitalPeriod: 224.7,
+            rotationPeriod: -243.025, // Negative indicates retrograde rotation
+            orbitalEccentricity: 0.0067,
+            atmosphereHeight: 250,
+            meanRadius: 6051.8,
+            sunSize: 10,
+            atmosphereColor: {
+                day: new THREE.Color(0xFFA500), // Orange-yellow thick atmosphere
+                sunset: new THREE.Color(0xFF4500),
+                night: new THREE.Color(0x1A0F00)
+            },
+            sunsetThreshold: 0.4, // Thick atmosphere creates longer twilight
+            sunColor: new THREE.Color(0xFFB366), // Filtered through thick atmosphere
+            fogColor: {
+                day: new THREE.Color().setHSL(0.08, 0.8, 0.5),
+                night: new THREE.Color().setHSL(0.08, 0.5, 0.1)
+            },
+            atmosphericDensity: 90, // Much denser than Earth
+            atmosphericTurbulence: 2.0,
+            customShaderEffects: {
+                colorShift: 0.5,
+                wavyDistortion: 5.0,
+            },
+            starDensity: 0, // Stars not visible through thick atmosphere
+            starSizeScale: 0,
+            starTwinkleSpeed: 0,
+        },
+
+        MARS: {
+            axialTilt: 25.19,
+            orbitalPeriod: 686.98,
+            rotationPeriod: 1.026,
+            orbitalEccentricity: 0.0934,
+            atmosphereHeight: 50,
+            meanRadius: 3389.5,
+            sunSize: 6, // Appears smaller due to distance
+            atmosphereColor: {
+                day: new THREE.Color(0xFFB266), // Dusty orange-red
+                sunset: new THREE.Color(0xFF6B4A),
+                night: new THREE.Color(0x060606)
+            },
+            sunsetThreshold: 0.15,
+            sunColor: new THREE.Color(0xFFCC99),
+            fogColor: {
+                day: new THREE.Color().setHSL(0.05, 0.6, 0.6),
+                night: new THREE.Color().setHSL(0.05, 0.3, 0.1)
+            },
+            atmosphericDensity: 0.01,
+            atmosphericTurbulence: 1.5,
+            customShaderEffects: {
+                colorShift: 0.2,
+                wavyDistortion: 2.0,
+            },
+            starDensity: 0.8,
+            starSizeScale: 5.5,
+            starTwinkleSpeed: 0.1,
+        },
+
+        JUPITER: {
+            axialTilt: 3.13,
+            orbitalPeriod: 4332.59,
+            rotationPeriod: 0.414, // Fastest rotating planet
+            orbitalEccentricity: 0.0489,
+            atmosphereHeight: 1000, // Vast atmosphere
+            meanRadius: 69911,
+            sunSize: 4, // Appears smaller due to distance
+            atmosphereColor: {
+                day: new THREE.Color(0xE8B89A), // Beige with bands
+                sunset: new THREE.Color(0xCC7755),
+                night: new THREE.Color(0x0A0705)
+            },
+            sunsetThreshold: 0.3,
+            sunColor: new THREE.Color(0xFFDD99),
+            fogColor: {
+                day: new THREE.Color().setHSL(0.07, 0.7, 0.6),
+                night: new THREE.Color().setHSL(0.07, 0.4, 0.1)
+            },
+            atmosphericDensity: 3.0,
+            atmosphericTurbulence: 4.0, // Strong atmospheric bands
+            customShaderEffects: {
+                colorShift: 0.3,
+                wavyDistortion: 8.0,
+            },
+            starDensity: 0.6,
+            starSizeScale: 4.0,
+            starTwinkleSpeed: 0.3,
+        },
+
+        SATURN: {
+            axialTilt: 26.73,
+            orbitalPeriod: 10759.22,
+            rotationPeriod: 0.444,
+            orbitalEccentricity: 0.0565,
+            atmosphereHeight: 800,
+            meanRadius: 58232,
+            sunSize: 3,
+            atmosphereColor: {
+                day: new THREE.Color(0xF4D03F), // Pale yellow
+                sunset: new THREE.Color(0xE67E22),
+                night: new THREE.Color(0x090807)
+            },
+            sunsetThreshold: 0.25,
+            sunColor: new THREE.Color(0xFFEEBB),
+            fogColor: {
+                day: new THREE.Color().setHSL(0.15, 0.6, 0.6),
+                night: new THREE.Color().setHSL(0.15, 0.3, 0.1)
+            },
+            atmosphericDensity: 2.5,
+            atmosphericTurbulence: 3.0,
+            customShaderEffects: {
+                colorShift: 0.4,
+                wavyDistortion: 6.0,
+            },
+            starDensity: 0.7,
+            starSizeScale: 3.5,
+            starTwinkleSpeed: 0.25,
+        },
+
+        URANUS: {
+            axialTilt: 97.77, // Nearly perpendicular to its orbit
+            orbitalPeriod: 30688.5,
+            rotationPeriod: -0.718, // Retrograde rotation
+            orbitalEccentricity: 0.0457,
+            atmosphereHeight: 500,
+            meanRadius: 25362,
+            sunSize: 2,
+            atmosphereColor: {
+                day: new THREE.Color(0x73C6B6), // Pale blue-green
+                sunset: new THREE.Color(0x45B39D),
+                night: new THREE.Color(0x050807)
+            },
+            sunsetThreshold: 0.2,
+            sunColor: new THREE.Color(0xFFFFDD),
+            fogColor: {
+                day: new THREE.Color().setHSL(0.45, 0.5, 0.5),
+                night: new THREE.Color().setHSL(0.45, 0.3, 0.1)
+            },
+            atmosphericDensity: 2.0,
+            atmosphericTurbulence: 2.5,
+            customShaderEffects: {
+                colorShift: 0.6,
+                wavyDistortion: 4.0,
+            },
+            starDensity: 0.8,
+            starSizeScale: 3.0,
+            starTwinkleSpeed: 0.2,
+        },
+
+        NEPTUNE: {
+            axialTilt: 28.32,
+            orbitalPeriod: 60182,
+            rotationPeriod: 0.671,
+            orbitalEccentricity: 0.0113,
+            atmosphereHeight: 600,
+            meanRadius: 24622,
+            sunSize: 1.5,
+            atmosphereColor: {
+                day: new THREE.Color(0x2E86C1), // Deep blue
+                sunset: new THREE.Color(0x2874A6),
+                night: new THREE.Color(0x040608)
+            },
+            sunsetThreshold: 0.2,
+            sunColor: new THREE.Color(0xFFFFEE),
+            fogColor: {
+                day: new THREE.Color().setHSL(0.6, 0.7, 0.5),
+                night: new THREE.Color().setHSL(0.6, 0.4, 0.1)
+            },
+            atmosphericDensity: 2.2,
+            atmosphericTurbulence: 3.5, // Strong winds
+            customShaderEffects: {
+                colorShift: 0.7,
+                wavyDistortion: 7.0,
+            },
+            starDensity: 0.9,
+            starSizeScale: 2.5,
+            starTwinkleSpeed: 0.15,
         }
     };
 
@@ -62,34 +277,37 @@ export class Atmosphere {
         this.scene = scene;
         this.renderer = renderer;
         this.config = config;
-        
+
         // Orbital parameters
         this.axialTilt = config.axialTilt * Math.PI / 180;
         this.orbitalPeriod = config.orbitalPeriod;
         this.rotationPeriod = config.rotationPeriod;
         this.eccentricity = config.orbitalEccentricity;
-        
+        this.observerLatitude = 37; // Default to SF (degrees) (37, -122)
+        this.observerLongitude = -122;
+
         // Visualization parameters
-        this.orbitRadius = 100;
-        this.timeScale = 0.1; // default to ~.001
+        this.orbitRadius = 50;
+        this.timeScale = .01; // default to ~.01
         this.cycleSpeed = 0.02;
-        
+
         // Position tracking
         this.time = 0;
         this.solarLongitude = 0;
         this.rotationAngle = 0;
         this.meanAnomaly = 0;
         this.dayNightValue = 0.5;
-        
+
         // Special effects tracking
         this.dustStormIntensity = 0;
-        
+
         // Initialize components
         this.initLights();
         this.initFog();
         this.initSky();
         this.initSunVisual();
-        
+        this.initStarfield();
+
         // Material references
         this.materials = {
             clouds: null,
@@ -107,7 +325,7 @@ export class Atmosphere {
         this.scene.add(this.hemiLight);
 
         // Sun
-        this.sun = new THREE.DirectionalLight(this.config.sunColor, 0.5);
+        this.sun = new THREE.DirectionalLight(this.config.sunColor, 0.2);
         this.sun.position.set(100, 100, 100);
         this.sun.castShadow = true;
         this.configureShadows(this.sun);
@@ -128,12 +346,12 @@ export class Atmosphere {
         light.shadow.camera.right = 200;
         light.shadow.camera.top = 200;
         light.shadow.camera.bottom = -200;
-        light.shadow.camera.updateProjectionMatrix(); 
+        light.shadow.camera.updateProjectionMatrix();
     }
 
     initSky() {
         const skyGeometry = new THREE.SphereGeometry(900, 32, 32);
-        
+
         this.skyMaterial = new THREE.ShaderMaterial({
             uniforms: {
                 sunPosition: { value: new THREE.Vector3() },
@@ -303,7 +521,6 @@ export class Atmosphere {
             uniforms: {
                 time: { value: 0 },
                 color: { value: this.config.sunColor },
-                glowIntensity: { value: this.config.customShaderEffects?.glowIntensity || 1.0 }
             },
             vertexShader: `
                 varying vec2 vUv;
@@ -318,7 +535,6 @@ export class Atmosphere {
             fragmentShader: `
                 uniform vec3 color;
                 uniform float time;
-                uniform float glowIntensity;
                 
                 varying vec2 vUv;
                 varying vec3 vNormal;
@@ -398,17 +614,13 @@ export class Atmosphere {
                     vec3 noisePos = vec3(vUv * 5.0, time * 0.2);
                     float noise = snoise(noisePos) * 0.5 + 0.5;
                     
-                    // Create pulsing glow effect
-                    float glow = sin(time * 2.0) * 0.1 + 0.9;
-                    
                     // Create corona effect
                     float corona = pow(1.0 - dot(vNormal, vec3(0.0, 0.0, 1.0)), 3.0);
-                    corona *= glowIntensity;
                     
                     // Combine all effects
                     vec3 finalColor = baseColor;
                     finalColor += color * noise * 0.3;
-                    finalColor += color * corona * glow;
+                    finalColor += color * corona;
                     
                     // Add extra brightness in the center
                     float center = 1.0 - length(vUv - 0.5) * 2.0;
@@ -423,10 +635,141 @@ export class Atmosphere {
             depthTest: true,
             side: THREE.FrontSide,
         });
-        
+
         this.sunVisual = new THREE.Mesh(sunGeometry, sunMaterial);
         this.sunVisual.renderOrder = 999;
         this.scene.add(this.sunVisual);
+    }
+
+    initStarfield() {
+        const starCount = 15000;
+        const positions = new Float32Array(starCount * 3);
+        const sizes = new Float32Array(starCount);
+        const colors = new Float32Array(starCount * 3);
+        const randoms = new Float32Array(starCount);
+
+        // Generate random star positions and properties
+        for (let i = 0; i < starCount; i++) {
+            // Spherical coordinates with Fibonacci distribution
+            const phi = Math.acos(-1 + (2 * i) / starCount);
+            const theta = Math.sqrt(starCount * Math.PI) * phi;
+
+            const radius = 890; // Slightly smaller than sky sphere
+            positions[i * 3] = radius * Math.cos(theta) * Math.sin(phi);
+            positions[i * 3 + 1] = radius * Math.sin(theta) * Math.sin(phi);
+            positions[i * 3 + 2] = radius * Math.cos(phi);
+
+            // Size and color variations
+            sizes[i] = Math.pow(Math.random(), 3) * 2 + 0.1;
+            randoms[i] = Math.random();
+
+            // Color temperature variations
+            const temp = 2500 + Math.random() * 10000;
+            const color = this.blackbodyColor(temp);
+            colors[i * 3] = color.r;
+            colors[i * 3 + 1] = color.g;
+            colors[i * 3 + 2] = color.b;
+        }
+
+        // Create starfield geometry
+        const geometry = new THREE.BufferGeometry();
+        geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+        geometry.setAttribute('size', new THREE.BufferAttribute(sizes, 1));
+        geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+        geometry.setAttribute('random', new THREE.BufferAttribute(randoms, 1));
+
+        // Starfield material with adjustable parameters
+        this.starMaterial = new THREE.ShaderMaterial({
+            uniforms: {
+                density: { value: this.config.starDensity },
+                sizeScale: { value: this.config.starSizeScale },
+                time: { value: 0 },
+                sunDirection: { value: new THREE.Vector3() },
+                fadeRange: { value: 0.9 },
+                twinkleSpeed: { value: this.config.starTwinkleSpeed },
+                pixelRatio: { value: window.devicePixelRatio },
+                minSizeThreshold: { value: 5.0 } // Add new uniform for size threshold
+            },
+            vertexShader: `
+        attribute float size;
+        attribute vec3 color;
+        attribute float random;
+        varying vec3 vColor;
+        varying float vAlpha;
+        varying float vSize;
+
+        uniform float density;
+        uniform float sizeScale;
+        uniform float time;
+        uniform float twinkleSpeed;
+        uniform vec3 sunDirection;
+        uniform float fadeRange;
+        uniform float pixelRatio;
+        uniform float minSizeThreshold;
+
+        void main() {
+            // Calculate the adjusted size first
+            float adjustedSize = size * sizeScale * pixelRatio;
+            
+            // Check both density and size threshold
+            if(random > density || adjustedSize < minSizeThreshold) {
+                vAlpha = 0.0;
+                vSize = 0.0;
+            } else {
+                // Calculate star brightness based on sun position
+                float sunHeight = clamp(sunDirection.y, -1.0, 1.0);
+                float nightFactor = smoothstep(0.0, fadeRange, -sunHeight);
+                
+                // Twinkle effect
+                float twinkle = sin(time * twinkleSpeed + random * 100.0) * 0.3 + 0.7;
+                
+                vColor = color * nightFactor * twinkle;
+                vAlpha = nightFactor * twinkle;
+                vSize = adjustedSize;
+            }
+
+            vec4 mvPosition = modelViewMatrix * vec4(position, 1.0);
+            gl_PointSize = vSize * (300.0 / -mvPosition.z);
+            gl_Position = projectionMatrix * mvPosition;
+        }
+    `,
+            fragmentShader: `
+        varying vec3 vColor;
+        varying float vAlpha;
+        varying float vSize;
+
+        void main() {
+            // Discard if either alpha is 0 or size is 0
+            if(vAlpha <= 0.0 || vSize <= 0.0) discard;
+            
+            // Calculate distance from center with pixel-perfect coordinates
+            vec2 coord = (gl_PointCoord - 0.5) * 2.0;
+            float dist = length(coord);
+            
+            // Calculate antialiased edge
+            float radius = 0.9;
+            float smoothWidth = 1.5 / vSize;
+            float alpha = smoothstep(radius + smoothWidth, radius - smoothWidth, dist);
+            
+            // Apply star intensity falloff
+            float intensity = 1.0 - smoothstep(0.0, radius, dist);
+            intensity = pow(intensity, 1.5);
+            
+            // Combine with varying alpha
+            alpha *= vAlpha * intensity;
+            
+            gl_FragColor = vec4(vColor, alpha);
+        }
+    `,
+            transparent: true,
+            depthWrite: false,
+            blending: THREE.AdditiveBlending
+        });
+
+        // Create starfield object
+        this.starfield = new THREE.Points(geometry, this.starMaterial);
+        this.starfield.rotation.x = this.axialTilt;
+        this.scene.add(this.starfield);
     }
 
     initFog() {
@@ -440,15 +783,49 @@ export class Atmosphere {
     updateFog() {
         if (!this.scene.fog) return;
 
+        // Get sun altitude for color transitions
+        const sunPos = this.calculateSunPosition();
+        const sunAltitude = sunPos.y / this.orbitRadius;
+
+        // Calculate fog distances based on time of day
         const fogNear = 20 + (1 - this.dayNightValue) * 10;
         const fogFar = 300 + this.dayNightValue * 200;
 
-        this.scene.fog.color.lerpColors(
-            this.config.fogColor.night,
-            this.config.fogColor.day,
-            this.dayNightValue
+        // Get HSL values from the preset night fog color
+        const hsl = {};
+        this.config.fogColor.night.getHSL(hsl);
+        
+        // Create night fog color with minimum brightness but keeping the hue and saturation
+        const nightFogColor = new THREE.Color().setHSL(
+            hsl.h,
+            hsl.s,
+            Math.max(hsl.l, 0.05)  // Ensure minimum brightness of 5%
         );
 
+        // Calculate fog color based on sun position
+        const fogColor = new THREE.Color();
+        if (sunAltitude < -0.4) { 
+            // Full night - use night fog color with enforced minimum brightness
+            fogColor.copy(nightFogColor);
+        } else if (sunAltitude < 0) { 
+            // Night to sunset transition
+            const t = (sunAltitude + 0.4) / 0.4;
+            const sunsetColor = this.config.atmosphereColor.sunset.clone().multiplyScalar(0.8);
+            fogColor.lerpColors(nightFogColor, sunsetColor, t);
+        } else if (sunAltitude < 0.3) { 
+            // Sunset to day transition
+            const t = sunAltitude / 0.3;
+            const sunsetColor = this.config.atmosphereColor.sunset.clone().multiplyScalar(0.8);
+            fogColor.lerpColors(sunsetColor, this.config.fogColor.day, t);
+        } else { 
+            // Full day
+            fogColor.copy(this.config.fogColor.day);
+        }
+
+        // Apply fog color
+        this.scene.fog.color.copy(fogColor);
+
+        // Handle dust storms if enabled
         if (this.config.dustStorms && this.dustStormIntensity > 0) {
             const dustColor = new THREE.Color(0.8, 0.6, 0.3);
             this.scene.fog.color.lerp(dustColor, this.dustStormIntensity * 0.5);
@@ -463,6 +840,26 @@ export class Atmosphere {
     registerMaterials(materials) {
         this.materials = { ...this.materials, ...materials };
     }
+
+    blackbodyColor(temp) {
+        // Approximate blackbody radiation color
+        temp /= 100;
+        let r, g, b;
+
+        if (temp <= 66) {
+            r = 255;
+            g = Math.min(Math.max(99.4708025861 * Math.log(temp) - 161.1195681661, 0), 255);
+        } else {
+            r = Math.min(Math.max(329.698727446 * Math.pow(temp - 60, -0.1332047592), 0), 255);
+            g = Math.min(Math.max(288.1221695283 * Math.pow(temp - 60, -0.0755148492), 0), 255);
+        }
+
+        if (temp >= 66) b = 255;
+        else b = temp <= 19 ? 0 : Math.min(Math.max(138.5177312231 * Math.log(temp - 10) - 305.0447927307, 0), 255);
+
+        return new THREE.Color(r / 255, g / 255, b / 255);
+    }
+
 
     calculateKeplerEquation(meanAnomaly, eccentricity, tolerance = 1e-6) {
         let E = meanAnomaly;
@@ -485,37 +882,36 @@ export class Atmosphere {
     }
 
     calculateSunPosition() {
-        this.meanAnomaly = (2 * Math.PI * this.time) / this.orbitalPeriod;
-        const eccentricAnomaly = this.calculateKeplerEquation(
-            this.meanAnomaly, 
-            this.eccentricity
-        );
-        
-        this.solarLongitude = this.calculateTrueAnomaly(eccentricAnomaly);
-        
-        const declination = Math.asin(
-            Math.sin(this.axialTilt) * Math.sin(this.solarLongitude)
-        );
-        
-        const hourAngle = this.rotationAngle;
-        const latitude = 0;
-        
-        const sinAltitude = Math.sin(latitude) * Math.sin(declination) + 
-                           Math.cos(latitude) * Math.cos(declination) * Math.cos(hourAngle);
-        const altitude = Math.asin(sinAltitude);
-        
-        const sinAzimuth = -Math.cos(declination) * Math.sin(hourAngle) / Math.cos(altitude);
-        const cosAzimuth = (Math.sin(declination) - Math.sin(latitude) * sinAltitude) / 
-                          (Math.cos(latitude) * Math.cos(altitude));
-        const azimuth = Math.atan2(sinAzimuth, cosAzimuth);
-        
-        // Calculate orbital distance using eccentricity
-        const radius = this.orbitRadius * (1 - this.eccentricity * Math.cos(eccentricAnomaly));
-        
+        // Simplified orbital model (circular orbit)
+        const daysPerYear = this.orbitalPeriod;
+        const solarAngle = (2 * Math.PI * this.time) / daysPerYear;
+
+        // Axial tilt effect (declination)
+        const declination = this.axialTilt * Math.sin(solarAngle);
+
+        // Daily rotation (hour angle)
+        const hourAngle = (2 * Math.PI * this.time) / this.rotationPeriod;
+
+        // Convert observer latitude to radians
+        const latRad = this.observerLatitude * Math.PI / 180;
+
+        // Calculate sun position using horizontal coordinate system
+        const sinAlt = Math.sin(declination) * Math.sin(latRad) +
+            Math.cos(declination) * Math.cos(latRad) * Math.cos(hourAngle);
+        const altitude = Math.asin(sinAlt);
+
+        // Correct azimuth calculation using atan2
+        const cosAzNumerator = Math.sin(declination) - Math.sin(latRad) * sinAlt;
+        const cosAzDenominator = Math.cos(latRad) * Math.cos(altitude);
+        const sinAz = -Math.cos(declination) * Math.sin(hourAngle);
+        const azimuth = Math.atan2(sinAz, cosAzNumerator / cosAzDenominator);
+
+        // Convert to 3D position (relative to observer)
+        const distance = this.orbitRadius;
         return new THREE.Vector3(
-            radius * Math.cos(altitude) * Math.sin(azimuth),
-            radius * Math.sin(altitude),
-            radius * Math.cos(altitude) * Math.cos(azimuth)
+            distance * Math.cos(altitude) * Math.sin(azimuth),
+            distance * Math.sin(altitude),
+            distance * Math.cos(altitude) * Math.cos(azimuth)
         );
     }
 
@@ -531,85 +927,149 @@ export class Atmosphere {
     }
 
     update(deltaTime, playerPos, camera) {
-        // Update time and position
-        const orbitalSpeed = (2 * Math.PI * this.timeScale * deltaTime) / this.orbitalPeriod;
-        this.time += orbitalSpeed;
-        
-        // Update rotation
-        const rotationSpeed = (2 * Math.PI * this.timeScale * deltaTime) / this.rotationPeriod;
-        this.rotationAngle = (this.rotationAngle + rotationSpeed) % (2 * Math.PI);
-        
-        // Calculate sun position
+        // Update global time progression
+        this.time += deltaTime * this.timeScale;
+    
+        // Calculate sun position with latitude consideration
         const sunPos = this.calculateSunPosition();
-        
-        // Update sky position
-        this.sky.position.copy(camera.position);
-        
-        // Update light position and target
-
-        const targetSunPos = this.calculateSunPosition();
-        this.sun.position.lerp(targetSunPos, 0.1);        
-        // Update light target
+        const sunDirection = sunPos.clone().normalize();
+    
+        // Update celestial objects positions
+        this.sun.position.copy(sunPos);
         this.lightTarget.position.set(0, 0, 0);
-
-        
-        // Calculate sun direction relative to camera
-        const sunDirection = sunPos.clone()
-            .sub(camera.position)
-            .normalize();
-        
-        // Update sky shader uniforms
+    
+        // Update sky material uniforms
         if (this.skyMaterial) {
             this.skyMaterial.uniforms.sunPosition.value.copy(sunDirection);
-            this.skyMaterial.uniforms.sunPosition.value.copy(sunDirection);
-
-            // Calculate day/night value based on sun height
-            this.dayNightValue = Math.max(0, Math.min(1, this.dayNightValue));
+    
+            // Calculate day/night blend based on sun altitude
+            const sunAltitude = sunPos.y / this.orbitRadius;
+            this.dayNightValue = THREE.MathUtils.clamp(sunAltitude * 0.5 + 0.5, 0, 1);
+            this.skyMaterial.uniforms.dayNightCycle.value = this.dayNightValue;
+    
+            // Calculate sky colors for current time
+            const skyColor = new THREE.Color();
+            if (sunAltitude < -0.4) { // Full night
+                skyColor.copy(this.config.atmosphereColor.night);
+            } else if (sunAltitude < 0) { // Night to sunset
+                const t = (sunAltitude + 0.4) / 0.4;  // Adjusted range
+                skyColor.lerpColors(this.config.atmosphereColor.night, this.config.atmosphereColor.sunset, t);
+            } else if (sunAltitude < 0.3) { // Sunset to day
+                const t = sunAltitude / 0.3;  // Adjusted range
+                skyColor.lerpColors(this.config.atmosphereColor.sunset, this.config.atmosphereColor.day, t);
+            } else { // Full day
+                skyColor.copy(this.config.atmosphereColor.day);
+            }
+    
+            // Starlight settings
+            const starlightColor = new THREE.Color(0.45, 0.45, 0.35);
+            const starlightIntensity = 0.08;
+            const maxAmbientIntensity = 0.4;
+    
+            // Convert colors to HSL with safety checks
+            const starHSL = { h: 0, s: 0, l: 0 };
+            const skyHSL = { h: 0, s: 0, l: 0 };
+            starlightColor.getHSL(starHSL);
+            skyColor.getHSL(skyHSL);
+    
+            // Ensure minimum lightness values
+            starHSL.l = Math.max(starHSL.l, 0.15);
+            skyHSL.l = Math.max(skyHSL.l, 0.1);
+    
+            // Calculate color blend with adjusted ranges
+            const colorBlend = THREE.MathUtils.smoothstep(this.dayNightValue, 0.25, 0.65);
+    
+            // Interpolate HSL components with brightness boost
+            const blendedH = THREE.MathUtils.lerp(starHSL.h, skyHSL.h, colorBlend);
+            const blendedS = THREE.MathUtils.lerp(starHSL.s * 0.7, skyHSL.s, colorBlend);
+            const blendedL = THREE.MathUtils.lerp(starHSL.l, skyHSL.l, colorBlend) * 1.2;
+    
+            // Create final ambient color with clamped values and store on class instance
+            this.ambientColor = new THREE.Color().setHSL(
+                blendedH,
+                THREE.MathUtils.clamp(blendedS, 0, 1),
+                THREE.MathUtils.clamp(blendedL, 0.1, 1)
+            );
+    
+            // Calculate intensity with adjusted transition points and store on class instance
+            const intensityBlend = THREE.MathUtils.smoothstep(this.dayNightValue, 0.3, 0.6);
+            this.ambientIntensity = THREE.MathUtils.lerp(
+                starlightIntensity,
+                maxAmbientIntensity,
+                intensityBlend
+            );
+    
+            // Update hemisphere light with gamma correction
+            this.hemiLight.color.copy(this.ambientColor).convertLinearToSRGB();
+            this.hemiLight.intensity = this.ambientIntensity;
+            this.hemiLight.groundColor.copy(this.ambientColor)
+                .multiplyScalar(0.75)
+                .convertLinearToSRGB();
         }
-        
-        // Update light intensities
-        const sunHeight = sunPos.y / this.orbitRadius;
-        this.sun.intensity = Math.max(0, sunHeight) * 0.5;
-        
-        // Update hemisphere light
-        const minLight = 0.1;
-        const maxLight = 0.5;
-        this.hemiLight.intensity = minLight + (maxLight - minLight) * this.dayNightValue;
-        
-        // Update fog
+    
+        // Update lighting intensities
+        this.sun.intensity = sunDirection.y > 0 ? sunDirection.y * 0.8 : 0;
+    
+        // Update fog and atmospheric effects
         this.updateFog();
-        
-        // Update special effects
         this.updateSpecialEffects(deltaTime);
-        
+    
         // Update registered materials
         if (this.materials.clouds) {
-            this.materials.clouds.uniforms.dayNightCycle.value = this.dayNightValue;
-            this.materials.clouds.uniforms.time.value = performance.now() / 1000;
             this.materials.clouds.uniforms.lightDirection.value.copy(sunDirection);
+            this.materials.clouds.uniforms.dayNightCycle.value = this.dayNightValue;
         }
-        
-        if (this.materials.leaves) {
-            this.materials.leaves.uniforms.time.value = performance.now() / 1000;
-            this.materials.leaves.uniforms.sunPosition.value.copy(sunPos);
-            this.materials.leaves.uniforms.dayNightCycle.value = this.dayNightValue;
-        }
-        
+    
         if (this.materials.water) {
-            this.materials.water.uniforms.time.value = performance.now() / 1000;
             this.materials.water.uniforms.lightDirection.value.copy(sunDirection);
+            this.materials.water.uniforms.time.value = performance.now() / 1000;
         }
-        
-        // Update sun visual
-        if (this.sunVisual) {
-            this.sunVisual.position.copy(camera.position)
-                .add(sunDirection.multiplyScalar(900 * 0.98));
+    
+        if (this.materials.leaves) {
+            console.log('Ambient Color:', this.ambientColor.toArray());
+            console.log('Ambient Intensity:', this.ambientIntensity);
             
-            // Update sun shader uniforms
-            if (this.sunVisual.material.uniforms) {
-                this.sunVisual.material.uniforms.time.value = this.time;
-                // You can also update other uniforms here if needed
-            }
+            // Verify uniform updates
+            this.materials.leaves.uniforms.sunPosition.value.copy(sunDirection);
+            this.materials.leaves.uniforms.ambientColor.value.copy(this.ambientColor);
+            this.materials.leaves.uniforms.ambientIntensity.value = this.ambientIntensity;
+            this.materials.leaves.uniforms.time.value = this.time;
+            
+            // Force material update
+            this.materials.leaves.needsUpdate = true;
         }
+    
+        // console.log(this.ambientIntensity);
+    
+        // Update sun visualization
+        if (this.sunVisual) {
+            // Position sun visual relative to camera
+            const sunDistance = 900 * 0.98;
+            this.sunVisual.position.copy(playerPos)
+                .add(sunDirection.multiplyScalar(sunDistance));
+    
+            // Update sun shader effects
+            this.sunVisual.material.uniforms.time.value = this.time;
+        }
+    
+        // Update starfield
+        if (this.starfield) {
+            // Match camera position for infinite sky illusion
+            this.starfield.position.copy(playerPos);
+    
+            // Corrected rotation speed calculation with timeScale
+            const rotationSpeed = (2 * Math.PI * deltaTime * this.timeScale) / this.rotationPeriod;
+            this.starfield.rotation.y += rotationSpeed;
+            this.starfield.rotation.x = this.axialTilt;
+    
+            // Update starfield material uniforms
+            this.starMaterial.uniforms.time.value += deltaTime;
+            this.starMaterial.uniforms.sunDirection.value.copy(sunDirection);
+            this.starMaterial.uniforms.density.value = this.config.starDensity;
+            this.starMaterial.uniforms.sizeScale.value = this.config.starSizeScale;
+        }
+    
+        // Update sky position to follow camera
+        this.sky.position.copy(playerPos);
     }
 }

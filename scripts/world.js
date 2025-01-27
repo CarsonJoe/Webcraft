@@ -207,7 +207,117 @@ export const waterMaterial = new THREE.ShaderMaterial({
 });
 
 
-export let leavesMaterial = null;
+export let leavesMaterial = new THREE.ShaderMaterial({
+    uniforms: THREE.UniformsUtils.merge([
+        THREE.UniformsLib.fog,
+        {
+            time: { value: 0 },
+            windStrength: { value: 0.5 },
+            sunPosition: { value: new THREE.Vector3() },
+            dayNightCycle: { value: 0.5 },
+            ambientColor: { value: new THREE.Color() }, // Added
+            ambientIntensity: { value: 1.0 } // Added
+        }
+    ]),
+    vertexShader: `
+        varying vec3 vColor;
+        varying float vFogDepth;
+        varying float vLightLevel;
+        attribute vec3 randNormal;
+        attribute vec2 offset;
+        uniform float time;
+        uniform float windStrength;
+        uniform vec3 sunPosition;
+
+        void main() {
+            vec4 worldPosition = modelMatrix * vec4(position, 1.0);
+            
+            // Wind displacement
+            float windWave = sin(time * 2.0 + worldPosition.x * 0.5 + worldPosition.z * 0.3) * 0.3;
+            windWave += sin(time * 1.5 + worldPosition.x * 0.3) * 0.2;
+            float wind = windWave * windStrength;
+            worldPosition.x += wind * 0.5;
+            worldPosition.z += wind * 0.3;
+            worldPosition.y += abs(wind) * 0.2;
+
+            // Calculate directions
+            vec3 leafWorldPos = worldPosition.xyz;
+            vec3 toSun = normalize(sunPosition - leafWorldPos);
+            vec3 toCamera = normalize(cameraPosition - leafWorldPos);
+            
+            // Combine sun and camera influence
+            float sunEffect = dot(normalize(randNormal), toSun);
+            float cameraEffect = dot(normalize(randNormal), toCamera);
+            
+            // Reduce effect intensity by half
+            vLightLevel = (sunEffect + cameraEffect) * 0.25;
+
+            // Billboard effect
+            vec3 look = normalize(leafWorldPos - cameraPosition);
+            vec3 right = normalize(cross(vec3(0.0, 1.0, 0.0), look));
+            vec3 up = cross(look, right);
+            vec3 pos = worldPosition.xyz;
+            pos += right * offset.x * 1.36 * (1.0 + wind * 0.2);
+            pos += up * offset.y * 1.36 * (1.0 + wind * 0.1);
+
+            vec4 mvPosition = viewMatrix * vec4(pos, 1.0);
+            gl_Position = projectionMatrix * mvPosition;
+            gl_Position.z -= 0.0003;
+            vFogDepth = -mvPosition.z;
+            vColor = color;
+        }
+    `,
+    fragmentShader: `
+varying vec3 vColor;
+varying float vFogDepth;
+varying float vLightLevel;
+
+uniform vec3 fogColor;
+uniform float fogNear;
+uniform float fogFar;
+uniform vec3 ambientColor;
+uniform float ambientIntensity;
+
+void main() {
+    // Increase the range of lightFactor for more dramatic contrast
+    float lightFactor = smoothstep(-0.3, 0.4, vLightLevel);
+    
+    // Increase ambient light impact
+    vec3 ambientLight = ambientColor * ambientIntensity * 0.9; // Increased from 0.5
+    
+    // Lower the minimum light for darker shadows
+    float minLight = 0.05; // Reduced from 0.2
+    
+    // Combine ambient and directional lighting with more contrast
+    vec3 baseLight = ambientLight + vec3(minLight);
+    float directionalLight = mix(0.6, 1.3, lightFactor); // Increased range for more contrast
+    
+    // Final color calculation with enhanced contrast
+    vec3 adjustedColor = vColor * baseLight * directionalLight;
+    
+    // Optional: Add a slight gamma correction for more natural contrast
+    adjustedColor = pow(adjustedColor, vec3(1.1));
+    
+    // Ensure we don't exceed maximum brightness
+    adjustedColor = clamp(adjustedColor, vec3(0.0), vec3(1.0));
+    
+    // Fog calculation
+    float fogFactor = smoothstep(fogNear, fogFar, vFogDepth);
+    gl_FragColor = vec4(mix(adjustedColor, fogColor, fogFactor), 1.0);
+}
+
+`,
+    transparent: false,
+    depthWrite: true,
+    depthTest: true,
+    alphaTest: 0.5,
+    fog: true,
+    vertexColors: true,
+    side: THREE.DoubleSide,
+    polygonOffset: true,
+    polygonOffsetFactor: 1.0,
+    polygonOffsetUnits: 1.0,
+});
 
 // Initialize world systems
 export function initWorld() {
@@ -358,100 +468,7 @@ function createChunkMeshes(chunkX, chunkZ, solidData, waterData, leavesData) {
 
     // Initialize leaves material once
     if (!leavesMaterial) {
-        leavesMaterial = new THREE.ShaderMaterial({
-            uniforms: THREE.UniformsUtils.merge([
-                THREE.UniformsLib.fog,
-                {
-                    time: { value: 0 },
-                    windStrength: { value: 0.5 },
-                    sunPosition: { value: new THREE.Vector3() },
-                    dayNightCycle: { value: 0.5 }
-                }
-            ]),
-            vertexShader: `
-                varying vec3 vColor;
-                varying float vFogDepth;
-                varying float vLightLevel;
-                attribute vec3 randNormal;
-                attribute vec2 offset;
-                uniform float time;
-                uniform float windStrength;
-                uniform vec3 sunPosition;
-
-                void main() {
-                    vec4 worldPosition = modelMatrix * vec4(position, 1.0);
-                    
-                    // Wind displacement
-                    float windWave = sin(time * 2.0 + worldPosition.x * 0.5 + worldPosition.z * 0.3) * 0.3;
-                    windWave += sin(time * 1.5 + worldPosition.x * 0.3) * 0.2;
-                    float wind = windWave * windStrength;
-                    worldPosition.x += wind * 0.5;
-                    worldPosition.z += wind * 0.3;
-                    worldPosition.y += abs(wind) * 0.2;
-
-                    // Calculate directions
-                    vec3 leafWorldPos = worldPosition.xyz;
-                    vec3 toSun = normalize(sunPosition - leafWorldPos);
-                    vec3 toCamera = normalize(cameraPosition - leafWorldPos);
-                    
-                    // Combine sun and camera influence
-                    float sunEffect = dot(normalize(randNormal), toSun);
-                    float cameraEffect = dot(normalize(randNormal), toCamera);
-                    
-                    // Reduce effect intensity by half
-                    vLightLevel = (sunEffect + cameraEffect) * 0.25;
-
-                    // Billboard effect
-                    vec3 look = normalize(leafWorldPos - cameraPosition);
-                    vec3 right = normalize(cross(vec3(0.0, 1.0, 0.0), look));
-                    vec3 up = cross(look, right);
-                    vec3 pos = worldPosition.xyz;
-                    pos += right * offset.x * 1.36 * (1.0 + wind * 0.2);
-                    pos += up * offset.y * 1.36 * (1.0 + wind * 0.1);
-
-                    vec4 mvPosition = viewMatrix * vec4(pos, 1.0);
-                    gl_Position = projectionMatrix * mvPosition;
-                    gl_Position.z -= 0.0003;
-                    vFogDepth = -mvPosition.z;
-                    vColor = color;
-                }
-            `,
-            fragmentShader: `
-                uniform vec3 fogColor;
-                uniform float fogNear;
-                uniform float fogFar;
-                uniform float dayNightCycle;
-                varying vec3 vColor;
-                varying float vFogDepth;
-                varying float vLightLevel;
-
-                void main() {
-                    // Smoother transition with reduced intensity
-                    float lightFactor = smoothstep(-0.2, 0.3, vLightLevel);
-                    
-                    // Reduced night light minimum
-                    float minNightLight = 0.25;
-                    float baseLight = minNightLight + (1.0 - minNightLight) * dayNightCycle;
-                    
-                    // Halved lighting effect
-                    vec3 adjustedColor = vColor * (baseLight * mix(0.8, 1.2, lightFactor));
-                    
-                    // Fog calculation
-                    float fogFactor = smoothstep(fogNear, fogFar, vFogDepth);
-                    gl_FragColor = vec4(mix(adjustedColor, fogColor, fogFactor), 1.0);
-                }
-            `,
-            transparent: false,
-            depthWrite: true,
-            depthTest: true,
-            alphaTest: 0.5,
-            fog: true,
-            vertexColors: true,
-            side: THREE.DoubleSide,
-            polygonOffset: true,
-            polygonOffsetFactor: 1.0,
-            polygonOffsetUnits: 1.0,
-        });
+        
     }
 
     // Remove existing meshes safely
