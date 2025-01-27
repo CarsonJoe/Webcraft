@@ -11,9 +11,9 @@ export class Atmosphere {
             atmosphereColor: {
                 day: new THREE.Color(0x87CEEB),
                 sunset: new THREE.Color(0xFF7F50),  // Coral color for sunset
-                night: new THREE.Color(0x1A2236)
+                night: new THREE.Color(0x07090d)
             },
-            sunsetThreshold: 1.0,
+            sunsetThreshold: 0.2,
             sunColor: new THREE.Color(0xFFFF99),
             fogColor: {
                 day: new THREE.Color().setHSL(0.6, 0.5, 0.7),
@@ -39,7 +39,7 @@ export class Atmosphere {
             atmosphereColor: {
                 day: new THREE.Color(0xFF70E9),
                 sunset: new THREE.Color(0xFF3366),  // Exotic pink-red sunset
-                night: new THREE.Color(0x200050)
+                night: new THREE.Color(0x080b12)
             },
             sunsetThreshold: 0.3,
             sunColor: new THREE.Color(0xFF3300),
@@ -71,7 +71,7 @@ export class Atmosphere {
         
         // Visualization parameters
         this.orbitRadius = 100;
-        this.timeScale = 0.01; // default to ~.001
+        this.timeScale = 0.1; // default to ~.001
         this.cycleSpeed = 0.02;
         
         // Position tracking
@@ -120,14 +120,15 @@ export class Atmosphere {
     }
 
     configureShadows(light) {
-        light.shadow.mapSize.width = 2048;
-        light.shadow.mapSize.height = 2048;
+        light.shadow.mapSize.width = 1024;
+        light.shadow.mapSize.height = 1024;
         light.shadow.camera.near = 10;
         light.shadow.camera.far = 500;
         light.shadow.camera.left = -200;
         light.shadow.camera.right = 200;
         light.shadow.camera.top = 200;
         light.shadow.camera.bottom = -200;
+        light.shadow.camera.updateProjectionMatrix(); 
     }
 
     initSky() {
@@ -238,10 +239,10 @@ export class Atmosphere {
                     float sunAltitude = vSunDirection.y;
                     
                     // Transition thresholds
-                    const float nightThreshold = -0.25;
-                    const float sunsetStart = -0.1;
-                    const float sunsetEnd = 0.1;
-                    const float dayThreshold = 0.25;
+                    const float nightThreshold = -0.4;
+                    const float sunsetStart = 0.1;
+                    const float sunsetEnd = 0.1; // actually sunset start
+                    const float dayThreshold = 0.5;
 
                     // Base colors with scattering
                     vec3 dayColorBase = planetColor * (1.0 - exp(-luminance * totalScattering * atmosphericDensity));
@@ -270,7 +271,7 @@ export class Atmosphere {
 
                     // Horizon glow (strongest during sunrise/sunset)
                     float horizonFactor = pow(1.0 - abs(dot(direction, vec3(0.0, 1.0, 0.0))), 4.0);
-                    float sunsetBlend = smoothstep(nightThreshold, dayThreshold, abs(sunAltitude));
+                    float sunsetBlend = smoothstep(sunsetStart, sunsetEnd, sunAltitude);
                     finalColor += sunsetColor * horizonFactor * sunsetBlend * 0.5;
 
                     // Dust storms
@@ -545,8 +546,9 @@ export class Atmosphere {
         this.sky.position.copy(camera.position);
         
         // Update light position and target
-        this.sun.position.copy(sunPos);
-        
+
+        const targetSunPos = this.calculateSunPosition();
+        this.sun.position.lerp(targetSunPos, 0.1);        
         // Update light target
         this.lightTarget.position.set(0, 0, 0);
 
