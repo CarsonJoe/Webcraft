@@ -1,9 +1,10 @@
 import Player from './player.js';
 import { CHUNK_HEIGHT } from './constants.js';
 import { updateChunks, setBlock, getBlock } from './world.js';
-import { initWorld, notifySceneReady, initializationComplete, leavesMaterial } from './world.js';
+import { initWorld, notifySceneReady, initializationComplete, leavesMaterial, waterMaterial } from './world.js';
 import { createSkybox, initRenderer, render, updateFog } from './renderer.js';
 import { UIManager } from './uiManager.js';
+import { Atmosphere } from './atmosphere.js';
 
 
 // Set up the scene, camera, and renderer
@@ -14,43 +15,12 @@ const renderer = initRenderer(scene, camera);
 initWorld();
 notifySceneReady();
 
-// Create and apply the skybox
-createSkybox(scene, renderer);
+const atmosphere = new Atmosphere(scene, renderer, Atmosphere.PLANETARY_CONFIGS.EARTH);
 
 
 let lastTime = 0;
-let maxOrbitHeight = 60;
-
-// Add ambient light
-const hemiLight = new THREE.HemisphereLight(0xffffff, 0xffffff, 2);
-hemiLight.color.setHSL(0.6, 1, 0.6);
-hemiLight.groundColor.setHSL(0.095, 1, 0.75);
-hemiLight.position.set(0, 50, 0);
-scene.add(hemiLight);
-
 // Add directional light
 const sun = new THREE.DirectionalLight(0xffffff, 0.5);
-sun.position.set(100, 100, 100);
-scene.add(sun);
-
-sun.castShadow = true;
-
-sun.shadow.mapSize.width = 2048;
-sun.shadow.mapSize.height = 2048;
-sun.shadow.camera.near = 10;
-sun.shadow.camera.far = 500;
-sun.shadow.camera.left = -200;
-sun.shadow.camera.right = 200;
-sun.shadow.camera.top = 200;
-sun.shadow.camera.bottom = -200;
-
-// const lightHelper = new THREE.DirectionalLightHelper(sun, 5);
-// scene.add(lightHelper);
-
-// Add directional light target
-const lightTarget = new THREE.Object3D();
-scene.add(lightTarget);
-sun.target = lightTarget;
 
 // Cloud setup
 import SimplexNoise from 'https://cdn.jsdelivr.net/npm/simplex-noise@3.0.0/+esm';
@@ -217,7 +187,7 @@ cloudGeometry.rotateX(-Math.PI / 2);
 const clouds = new THREE.Mesh(cloudGeometry, cloudMaterial);
 clouds.position.y = 180;
 clouds.renderOrder = -1; // Render before other objects
-scene.add(clouds);
+// scene.add(clouds);
 
 function updateCloudPosition() {
     const playerPos = Player.getPosition();
@@ -239,6 +209,12 @@ document.addEventListener('contextmenu', (event) => event.preventDefault());
 // Animation loop
 let gameStarted = false;
 
+atmosphere.registerMaterials({
+    clouds: cloudMaterial,
+    water: waterMaterial,
+    leaves: leavesMaterial
+});
+
 function animate(timestamp) {
     requestAnimationFrame(animate);
     profiler.startFrame();
@@ -254,48 +230,19 @@ function animate(timestamp) {
     const deltaTime = (timestamp - lastTime) / 1000;
     lastTime = timestamp;
 
-    // Calculate cycle parameters
-    const cycleSpeed = 0.05; // Adjust this value to change cycle speed
-    const time = performance.now() * 0.001;
-    const angle = time * cycleSpeed;
-    const playerPos = Player.getPosition();
-
-    // Update light target to follow player
-    lightTarget.position.copy(playerPos);
-
-    const sunPosition = calculateSunPosition(angle, playerPos, maxOrbitHeight);
-    sun.position.copy(sunPosition);
-
-
-
-    // Update light intensities
-
-    const dayNightValue = (Math.sin(angle) + 1) * 0.5;
-
-    sun.intensity = Math.max(0, Math.sin(angle)) * 0.5;
-    // Update hemispheric light to match the same cycle
-    const minLightIntensity = 0.1;  // Minimum light at night
-    const maxLightIntensity = 0.5;   // Maximum light during day
-    hemiLight.intensity = minLightIntensity + (maxLightIntensity - minLightIntensity) * dayNightValue;
-    // Update cloud dayNightCycle uniform
-    updateFog(dayNightValue);
-    if (cloudMaterial) {
-
-        cloudMaterial.uniforms.dayNightCycle.value = dayNightValue;
-        cloudMaterial.uniforms.time.value = performance.now() / 1000;
-        cloudMaterial.uniforms.cloudPosition.value.copy(clouds.position);
-    }
+    // Update atmosphere system
+    atmosphere.update(deltaTime, Player.getPosition(), camera);
 
     if (leavesMaterial) {
         leavesMaterial.uniforms.time.value = performance.now() / 1000;
-        leavesMaterial.uniforms.sunPosition.value.copy(sun.position);
-        leavesMaterial.uniforms.dayNightCycle.value = dayNightValue;
+        // // leavesMaterial.uniforms.sunPosition.value.copy(sun.position);
+        // leavesMaterial.uniforms.dayNightCycle.value = dayNightValue;
     }
 
     // Update player with delta time
     Player.update(getBlock, deltaTime);
 
-    // Rest of the animate function remains the same...
+    // Update chunks and clouds
     updateChunks(Player.getPosition());
     updateCloudPosition();
     render(scene, camera);
@@ -303,26 +250,6 @@ function animate(timestamp) {
 }
 
 animate();
-
-function calculateSunPosition(angle, playerPos, maxAngleFromHorizon) {
-    // Convert max angle to radians
-    const maxAngleRad = (maxAngleFromHorizon * Math.PI) / 180;
-
-    // Calculate the orbit path
-    const horizontalRadius = 100 * Math.cos(maxAngleRad);
-    const maxHeight = 100 * Math.sin(maxAngleRad);
-
-    // Calculate current position in orbit
-    const currentHeight = playerPos.y + maxHeight * Math.sin(angle);
-    const xOffset = horizontalRadius * Math.cos(angle);
-    const zOffset = horizontalRadius * Math.sin(angle);
-
-    return new THREE.Vector3(
-        playerPos.x + xOffset,
-        currentHeight,
-        playerPos.z + zOffset
-    );
-}
 
 // Handle window resizing
 window.addEventListener('resize', () => {
