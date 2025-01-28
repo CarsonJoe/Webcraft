@@ -6,19 +6,24 @@ import { MATERIAL_CONFIG, leavesMaterial, solidMaterial, waterMaterial } from '.
 // Chunk states and initialization flags
 const CHUNK_LOADING = 1;
 const CHUNK_LOADED = 2;
+export const CHUNK_MESHED = 3;
 let chunkWorker = null;
+const workerCount = 2; // *** keeps up with max RD and diagonal flying at current player speeds, init generation is slow ***
 export let geometryWorkers = [];
 let currentGeometryWorkerIndex = 0;
 let initializationComplete = false;
 let workerInitialized = false;
 let sceneReady = false;
-export let spawnPoint = null;
 export const collisionGeometry = new Map();
 export let currentRenderDistance = RENDER_DISTANCE;
 
+let isInitialLoading = false;
+let initialChunks = [];
+let loadedInitialChunks = new Set();
+
 // Chunk storage and queues
 const chunks = {};
-const chunkStates = {};
+export const chunkStates = {};
 const queuedChunks = new Set(); // Track chunk keys like "x,z"
 let remeshQueue = new Set();
 const chunkLoadQueue = [];      // Use as a priority queue (heap)
@@ -28,130 +33,152 @@ let currentPlayerChunkZ = 0;
 
 // Initialize world systems
 export function initWorld() {
-    console.log("[World] Initializing world system...");
-    const SEED = Math.random() * 1000000;
-    console.log(`[World] Using seed: ${SEED}`);
+    return new Promise((resolve) => {
+        console.log("[World] Initializing world system...");
+        const SEED = Math.random() * 1000000;
+        console.log(`[World] Using seed: ${SEED}`);
 
-    // Add global error handler
-    window.addEventListener('unhandledrejection', event => {
-        console.error('Unhandled promise rejection:', event.reason);
-    });
-
-    window.addEventListener('error', event => {
-        console.error('Global error:', event.error);
-    });
-
-    addToLoadQueue(0, 0, 0);
-
-    // Generate initial spawn point at chunk (0,0)
-    spawnPoint = findSuitableSpawnPoint(0, 0);
-    console.log("Generated spawn point:", spawnPoint);
-
-    const workerCount = 2;
-    geometryWorkers = [];
-
-    for (let i = 0; i < workerCount; i++) {
-        const worker = new Worker(new URL('./geometryWorker.js', import.meta.url), { type: 'module' });
-
-        // Add error handling for worker
-        worker.onerror = function (error) {
-            console.error(`Geometry Worker ${i} Error:`, error);
-            console.error('Error details:', error.message, error.filename, error.lineno);
-        };
-
-        worker.postMessage({
-            type: 'init',
-            materials: MATERIAL_CONFIG,
-            seed: SEED
+        // Add global error handler
+        window.addEventListener('unhandledrejection', event => {
+            console.error('Unhandled promise rejection:', event.reason);
         });
 
-        worker.onmessage = function (e) {
-            if (!e.data) {
-                console.error('Received empty message from geometry worker');
-                return;
+        window.addEventListener('error', event => {
+            console.error('Global error:', event.error);
+        });
+
+        addToLoadQueue(0, 0, 0);
+
+        // Initialize initial loading parameters
+        isInitialLoading = true;
+        initialChunks = [];
+        loadedInitialChunks.clear();
+
+        // Generate all chunks in initial radius (RENDER_DISTANCE + 1 to cover adjacent chunks)
+        const initialRadius = RENDER_DISTANCE + 1;
+        for (let x = -initialRadius; x <= initialRadius; x++) {
+            for (let z = -initialRadius; z <= initialRadius; z++) {
+                const chunkKey = `${x},${z}`;
+                addToLoadQueue(x, z, 0); // Highest priority
+                initialChunks.push(chunkKey);
             }
+        }
 
-            if (e.data.type === 'geometry_data') {
-                console.debug(`Received geometry data for chunk ${e.data.chunkX},${e.data.chunkZ}`);
-                try {
-                    if (e.data.solid.positions.length > 0 ||
-                        e.data.water.positions.length > 0 ||
-                        e.data.leaves.positions.length > 0) {
-                        createChunkMeshes(e.data.chunkX, e.data.chunkZ, e.data.solid, e.data.water, e.data.leaves);
-                    } else {
-                        console.warn(`Empty geometry for chunk ${e.data.chunkX},${e.data.chunkZ}`);
-                    }
-                } catch (error) {
-                    console.error('Error processing geometry:', error);
-                    console.error('Error chunk data:', e.data);
-                }
-            } else {
-                console.warn('Unknown message type from geometry worker:', e.data.type);
-            }
-        };
-        geometryWorkers.push(worker);
-    }
+        for (let i = 0; i < workerCount; i++) {
+            const worker = new Worker(new URL('./geometryWorker.js', import.meta.url), { type: 'module' });
 
-    chunkWorker = new Worker(new URL('./chunksWorker.js', import.meta.url), {
-        type: 'module'
-    });
-    console.log("[World] Web Worker created");
-
-    chunkWorker.onmessage = function (e) {
-        if (e.data.type === 'init_complete') {
-            workerInitialized = true;
-            checkInitialization();
-            if (sceneReady) {
-                processChunkQueue();
-            }
-        } else if (e.data.type === 'chunk_data') {
-            const { chunkX, chunkZ, chunkData } = e.data;
-            const chunkKey = `${chunkX},${chunkZ}`;
-
-            // 1. Clone the received buffer for main thread storage
-            const clonedBuffer = new ArrayBuffer(chunkData.byteLength);
-            new Int8Array(clonedBuffer).set(new Int8Array(chunkData));
-
-            // 2. Store cloned buffer in chunks
-            chunks[chunkKey] = new Int8Array(clonedBuffer);
-            chunkStates[chunkKey] = CHUNK_LOADED;
-
-            // 3. Prepare adjacent chunks with fresh buffers
-            const transferList = [chunkData]; // Transfer original buffer
-            const adjacentChunks = {};
-
-            [[1, 0], [-1, 0], [0, 1], [0, -1]].forEach(([dx, dz]) => {
-                const adjKey = `${chunkX + dx},${chunkZ + dz}`;
-                if (chunks[adjKey]) {
-                    // Clone adjacent chunk's buffer for transfer
-                    const adjClone = new ArrayBuffer(chunks[adjKey].buffer.byteLength);
-                    new Int8Array(adjClone).set(chunks[adjKey]);
-                    adjacentChunks[adjKey] = adjClone;
-                    transferList.push(adjClone);
-                }
-            });
-
-            // 4. Send message with transferrable buffers
-            const worker = geometryWorkers[currentGeometryWorkerIndex];
-            currentGeometryWorkerIndex = (currentGeometryWorkerIndex + 1) % geometryWorkers.length;
+            // Add error handling for worker
+            worker.onerror = function (error) {
+                console.error(`Geometry Worker ${i} Error:`, error);
+                console.error('Error details:', error.message, error.filename, error.lineno);
+            };
 
             worker.postMessage({
-                type: 'process_chunk',
-                chunkX,
-                chunkZ,
-                chunkData: chunkData,
-                adjacentChunks,
-                isInitialGeneration: true
-            }, transferList);
+                type: 'init',
+                materials: MATERIAL_CONFIG,
+                seed: SEED
+            });
 
-            updateAdjacentChunks(chunkX, chunkZ);
+            worker.onmessage = function (e) {
+                if (!e.data) {
+                    console.error('Received empty message from geometry worker');
+                    return;
+                }
+
+                if (e.data.type === 'geometry_data') {
+                    console.debug(`Received geometry data for chunk ${e.data.chunkX},${e.data.chunkZ}`);
+                    try {
+                        if (e.data.solid.positions.length > 0 ||
+                            e.data.water.positions.length > 0 ||
+                            e.data.leaves.positions.length > 0) {
+                            createChunkMeshes(e.data.chunkX, e.data.chunkZ, e.data.solid, e.data.water, e.data.leaves);
+                        } else {
+                            console.warn(`Empty geometry for chunk ${e.data.chunkX},${e.data.chunkZ}`);
+                        }
+                    } catch (error) {
+                        console.error('Error processing geometry:', error);
+                        console.error('Error chunk data:', e.data);
+                    }
+                } else {
+                    console.warn('Unknown message type from geometry worker:', e.data.type);
+                }
+            };
+            geometryWorkers.push(worker);
         }
-    };
 
-    console.log("[World] Sending worker init message");
-    chunkWorker.postMessage({
-        type: 'init',
-        seed: SEED
+        chunkWorker = new Worker(new URL('./chunksWorker.js', import.meta.url), {
+            type: 'module'
+        });
+        console.log("[World] Web Worker created");
+
+        chunkWorker.onmessage = function (e) {
+            if (e.data.type === 'init_complete') {
+                workerInitialized = true;
+                checkInitialization();
+                resolve();
+                if (sceneReady) {
+                    processChunkQueue();
+                }
+            } else if (e.data.type === 'chunk_data') {
+                const { chunkX, chunkZ, chunkData } = e.data;
+                const chunkKey = `${chunkX},${chunkZ}`;
+
+                // 1. Clone the received buffer for main thread storage
+                const clonedBuffer = new ArrayBuffer(chunkData.byteLength);
+                new Int8Array(clonedBuffer).set(new Int8Array(chunkData));
+
+                // 2. Store cloned buffer in chunks
+                chunks[chunkKey] = new Int8Array(clonedBuffer);
+                chunkStates[chunkKey] = CHUNK_LOADED;
+
+                if (isInitialLoading) {
+                    loadedInitialChunks.add(chunkKey);
+                    // Check if all initial chunks are loaded
+                    if (loadedInitialChunks.size === initialChunks.length - 4) {
+                        isInitialLoading = false;
+                        console.log('[World] All initial chunks loaded. Starting meshing...');
+                        // Add all initial chunks to remeshQueue
+                        initialChunks.forEach(key => remeshQueue.add(key));
+                        processChunkQueue();
+                    }
+                } else {
+                    // Existing logic to prepare and send adjacent chunks
+                    updateAdjacentChunks(chunkX, chunkZ);
+                    const transferList = [chunkData];
+                    const adjacentChunks = {};
+
+                    [[1, 0], [-1, 0], [0, 1], [0, -1]].forEach(([dx, dz]) => {
+                        const adjKey = `${chunkX + dx},${chunkZ + dz}`;
+                        if (chunks[adjKey]) {
+                            const adjClone = new ArrayBuffer(chunks[adjKey].buffer.byteLength);
+                            new Int8Array(adjClone).set(chunks[adjKey]);
+                            adjacentChunks[adjKey] = adjClone;
+                            transferList.push(adjClone);
+                        }
+                    });
+
+                    const worker = geometryWorkers[currentGeometryWorkerIndex];
+                    currentGeometryWorkerIndex = (currentGeometryWorkerIndex + 1) % geometryWorkers.length;
+
+                    worker.postMessage({
+                        type: 'process_chunk',
+                        chunkX,
+                        chunkZ,
+                        chunkData: chunkData,
+                        adjacentChunks,
+                        isInitialGeneration: true
+                    }, transferList);
+                }
+
+                updateAdjacentChunks(chunkX, chunkZ);
+            }
+        };
+
+        console.log("[World] Sending worker init message");
+        chunkWorker.postMessage({
+            type: 'init',
+            seed: SEED
+        });
     });
 }
 
@@ -160,12 +187,12 @@ export function setRenderDistance(newDistance) {
     // Update fog settings
     scene.fog.near = (newDistance / 24 * 100);
     scene.fog.far = (newDistance / 4 * 100);
-    
+
     // Trigger chunk update if world is initialized
     if (initializationComplete) {
         updateChunks({
-            x: currentPlayerChunkX * CHUNK_SIZE + CHUNK_SIZE/2,
-            z: currentPlayerChunkZ * CHUNK_SIZE + CHUNK_SIZE/2
+            x: currentPlayerChunkX * CHUNK_SIZE + CHUNK_SIZE / 2,
+            z: currentPlayerChunkZ * CHUNK_SIZE + CHUNK_SIZE / 2
         });
     }
 }
@@ -175,7 +202,7 @@ function createChunkMeshes(chunkX, chunkZ, solidData, waterData, leavesData) {
 
     // Initialize leaves material once
     if (!leavesMaterial) {
-        
+
     }
 
     // Remove existing meshes safely
@@ -276,6 +303,7 @@ function createChunkMeshes(chunkX, chunkZ, solidData, waterData, leavesData) {
     if (leavesMesh) {
         leavesMesh.position.set(worldX, 0, worldZ);
         scene.add(leavesMesh);
+        leavesMesh.castShadow = true;
     }
 
     // Update chunk meshes reference
@@ -284,6 +312,9 @@ function createChunkMeshes(chunkX, chunkZ, solidData, waterData, leavesData) {
         water: waterMesh || null,
         leaves: leavesMesh || null
     };
+
+
+    chunkStates[chunkKey] = CHUNK_MESHED;
 }
 
 function createGeometryFromData(data) {
@@ -313,8 +344,12 @@ function checkInitialization() {
     if (workerInitialized && sceneReady) {
         initializationComplete = true;
         console.log("[World] Full initialization complete");
-        // Start initial chunk processing
+
+        // Force initial chunk processing
         processChunkQueue();
+
+        // Start continuous processing (new)
+        requestAnimationFrame(processChunkQueue);
     }
 }
 
@@ -328,8 +363,7 @@ function updateAdjacentChunks(chunkX, chunkZ) {
 
     neighbors.forEach(([x, z]) => {
         const key = `${x},${z}`;
-        if (chunks[key] && chunkStates[key] === CHUNK_LOADED) {
-            // Send existing adjacent chunks to geometry worker for mesh regeneration
+        if (chunks[key]) { // Check if chunk exists, regardless of state
             sendChunkToGeometryWorker(x, z);
         }
     });
@@ -359,8 +393,10 @@ function addToLoadQueue(x, z) {
     queuedChunks.add(chunkKey);
 }
 
-function processChunkQueue() {
-    if (!workerInitialized || !sceneReady) return;
+export function processChunkQueue() {
+    if (!workerInitialized || !sceneReady) {
+        return;
+    }
 
     // Process load queue first
     while (chunkLoadQueue.length > 0) {
@@ -370,7 +406,11 @@ function processChunkQueue() {
 
         if (!chunks[chunkKey] && chunkStates[chunkKey] !== CHUNK_LOADING) {
             chunkStates[chunkKey] = CHUNK_LOADING;
-            chunkWorker.postMessage({ chunkX: x, chunkZ: z });
+            chunkWorker.postMessage({
+                type: 'generate_chunk',
+                chunkX: x,
+                chunkZ: z
+            });
         }
 
     }
@@ -439,6 +479,7 @@ function processChunkQueue() {
     if (chunkLoadQueue.length > 0 || remeshQueue.size > 0) {
         requestAnimationFrame(processChunkQueue);
     }
+
 }
 
 function getBlock(x, y, z) {
@@ -567,15 +608,6 @@ function cleanupChunkData(chunkKey) {
 
 function findSuitableSpawnPoint(chunkX, chunkZ) {
     const chunkKey = `${chunkX},${chunkZ}`;
-    if (!chunks[chunkKey]) {
-        // Changed from Infinity to 0 for highest priority
-        addToLoadQueue(chunkX, chunkZ, 0);
-        return {
-            x: chunkX * CHUNK_SIZE + CHUNK_SIZE / 2,
-            y: CHUNK_HEIGHT, // Start at top
-            z: chunkZ * CHUNK_SIZE + CHUNK_SIZE / 2
-        };
-    }
 
     const centerX = Math.floor(CHUNK_SIZE / 2);
     const centerZ = Math.floor(CHUNK_SIZE / 2);
@@ -591,6 +623,9 @@ function findSuitableSpawnPoint(chunkX, chunkZ) {
     if (spawnY <= WATER_LEVEL) {
         spawnY = WATER_LEVEL + 2;
     }
+
+    
+    console.log("Generated spawn point:", spawnY);
 
     return {
         x: chunkX * CHUNK_SIZE + centerX,

@@ -2,7 +2,6 @@ import { CHUNK_SIZE, CHUNK_HEIGHT } from './constants.js';
 
 let materials = {};
 let seed = 0;
-let colorPRNG = null;
 
 function fastVariation(x, y, z) {
     // Use more iterations of bit mixing to get better distribution
@@ -45,69 +44,6 @@ function getBlockVariation(worldX, y, worldZ, blockType) {
         1 + (v - 0.5) * config.intensity * (config.channelBias?.[i] || 1)
     );
 }
-
-const VARIATION_CONFIG = {
-    1: { // Grass
-        scale: .2,     // Increase scale for more gradual changes
-        intensity: 0.06,
-        channelBias: [0.9, 1.1, 0.9]
-    },
-    2: { // Dirt
-        scale: .4,
-        intensity: 0.15,
-        channelBias: [1.0, 0.95, 0.9]
-    },
-    3: { // Stone
-        scale: .3,
-        intensity: 0.1,
-        channelBias: [1.0, 1.0, 1.0]
-    },
-    4: { // Sand
-        scale: 1,
-        intensity: 0.05,
-        channelBias: [1.1, 1.05, 0.95]
-    },
-    6: { // Wood
-        scale: 2.0,
-        intensity: 0.15,
-        channelBias: [0.95, 0.9, 0.85]
-    },
-    7: { // Leaves
-        scale: .1,
-        intensity: 0.2,
-        channelBias: [0.8, 1.2, 0.7]
-    },
-    8: { // Limestone
-        scale: .3,
-        intensity: 0.15,
-        channelBias: [0.9, 0.95, 1.1]
-    },
-    9: { // Slate
-        scale: .3,
-        intensity: 0.15,
-        channelBias: [0.9, 0.95, 1.1]
-    },
-    10: { // Red Flower
-        scale: 0.15,
-        intensity: 0.15,
-        channelBias: [1.3, 0.7, 0.7]
-    },
-    11: { // Orange Flower
-        scale: .1,
-        intensity: 0.2,
-        channelBias: [0.8, 1.2, 0.7]
-    },
-    12: { // White Flower
-        scale: .1,
-        intensity: 0.2,
-        channelBias: [0.8, 1.2, 0.7]
-    },
-    13: { // Grass Foliage
-        scale: 0.1,
-        intensity: 0.2,
-        channelBias: [0.8, 1.2, 0.7]  // Strong green variations
-    }
-};
 
 function createPRNG(seed) {
     return function () {
@@ -402,16 +338,7 @@ function getBlockInWorld(currentChunkX, currentChunkZ, localX, localY, localZ, c
     }
 
     // Treat unloaded chunks as non-transparent (stone)
-    return 3; // Changed from 0 to 3 (stone)
-}
-
-// Helper functions
-function hexToRGB(hex) {
-    return [
-        ((hex >> 16) & 255) / 255,
-        ((hex >> 8) & 255) / 255,
-        (hex & 255) / 255
-    ];
+    return 3;
 }
 
 function packageGeometry(geo) {

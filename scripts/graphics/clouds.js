@@ -1,4 +1,6 @@
 import SimplexNoise from 'https://cdn.jsdelivr.net/npm/simplex-noise@3.0.0/+esm';
+import { CHUNK_HEIGHT } from '../constants.js';
+
 
 export class CloudManager {
     // Cloud texture parameters
@@ -66,10 +68,10 @@ export class CloudManager {
                 dayNightCycle: { value: 0.5 },
                 cloudTexture: { value: this.cloudTexture },
                 lightDirection: { value: new THREE.Vector3() },
-                cloudSpeed: { value: 0.0005 },
-                cloudCover: { value: 0.9 },
+                cloudSpeed: { value: 0.005 },
+                cloudCover: { value: 0.5 },
                 densityScale: { value: 0.9 },
-                lightIntensity: { value: 0.5 },
+                lightIntensity: { value: 0.9 },
                 cloudPosition: { value: new THREE.Vector3() },
                 playerMovement: { value: new THREE.Vector2() }  // New uniform for tracking player movement
             },
@@ -126,7 +128,7 @@ export class CloudManager {
                     
                     float speed1 = cloudSpeed / 0.8;
                     float speed2 = cloudSpeed / 2.5;
-                    float speed3 = cloudSpeed / 0.3;
+                    float speed3 = cloudSpeed / 1.3;
 
                     vec2 uv1 = adjustedUV * 0.8 + vec2(time * speed1, 0.0);
                     vec2 uv2 = adjustedUV * 2.5 + vec2(0.0, time * speed2 * 0.7);
@@ -171,10 +173,10 @@ export class CloudManager {
                     vec3 finalColor = mix(ambientColor, shadedColor, density * ambientStrength);
                     
                     float baseAlpha = smoothstep(0.1, 0.9, density) * 0.8;
-                    baseAlpha *= mix(0.8, 1.2, fbm(uv * 5.0 + time * 0.1));
+                    baseAlpha *= mix(0.8, 1.2, fbm(uv * 5.0 + time * cloudSpeed * 0.1));
                     
                     vec2 localPos = vWorldPosition.xz - cloudPosition.xz;
-                    float distanceFromCenter = length(localPos) / 1500.0;
+                    float distanceFromCenter = length(localPos) / 750.0;
                     float edgeFade = 1.0 - smoothstep(0.1, 1.0, distanceFromCenter);
                     
                     float nightAlphaReduction = mix(0.3, 1.0, dayNightCycle);
@@ -190,10 +192,10 @@ export class CloudManager {
     }
 
     initCloudMesh() {
-        const cloudGeometry = new THREE.PlaneGeometry(3000, 3000);
+        const cloudGeometry = new THREE.PlaneGeometry(2000, 2000);
         cloudGeometry.rotateX(-Math.PI / 2);
         this.cloudMesh = new THREE.Mesh(cloudGeometry, this.cloudMaterial);
-        this.cloudMesh.position.y = 180;
+        this.cloudMesh.position.y = CHUNK_HEIGHT + 20;
         this.cloudMesh.renderOrder = -1;
         this.scene.add(this.cloudMesh);
     }

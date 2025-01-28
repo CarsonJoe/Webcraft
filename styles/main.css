@@ -293,3 +293,169 @@ canvas {
     min-width: 30px;
     text-align: right;
 }
+
+/* Start Screen Styles */
+.cyberpunk-menu {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100vh;
+    background: rgba(16, 20, 28, 0.98);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    backdrop-filter: blur(4px);
+    z-index: 9999;
+    border: 1px solid #00F7FF;
+    box-shadow: 0 0 40px rgba(0, 247, 255, 0.2);
+    overflow: hidden;
+}
+
+.neon-title {
+    font-family: 'Chakra Petch', sans-serif;
+    color: #00F7FF;
+    text-shadow: 0 0 30px rgba(0, 247, 255, 0.5);
+    font-size: 3.5rem;
+    margin-bottom: 3rem;
+    letter-spacing: 4px;
+    text-transform: uppercase;
+    position: relative;
+}
+
+/* Loading Screen Styles */
+.loading-container {
+    position: relative;
+    width: 500px;
+    max-width: 90vw;
+    padding: 40px;
+    background: rgba(0, 20, 30, 0.4);
+    border: 1px solid rgba(0, 247, 255, 0.3);
+    border-radius: 8px;
+    box-shadow: 0 0 30px rgba(0, 247, 255, 0.1);
+}
+
+.loading-bar-container {
+    position: relative;
+    height: 24px;
+    background: rgba(0, 20, 30, 0.9);
+    border: 2px solid #00F7FF;
+    border-radius: 12px;
+    overflow: hidden;
+    margin: 2rem auto;
+    box-shadow: inset 0 0 15px rgba(0, 0, 0, 0.5);
+}
+
+.cyber-loading-bar {
+    height: 100%;
+    width: 0%;
+    background: linear-gradient(90deg, 
+        rgba(0, 247, 255, 0.8) 0%, 
+        rgba(0, 202, 255, 0.9) 100%);
+    transition: width 0.3s ease;
+    position: relative;
+    box-shadow: 0 0 20px rgba(0, 247, 255, 0.4);
+}
+
+.loading-bar-glowing-edge {
+    position: absolute;
+    right: -5px;
+    top: 0;
+    height: 100%;
+    width: 15px;
+    background: linear-gradient(90deg, 
+        rgba(0, 247, 255, 0.7) 0%, 
+        transparent 100%);
+    filter: blur(2px);
+}
+
+.cyber-text {
+    font-family: 'Chakra Petch', sans-serif;
+    color: #8C9BA5;
+    text-transform: uppercase;
+    letter-spacing: 3px;
+    font-size: 1rem;
+    text-shadow: 0 0 10px rgba(0, 247, 255, 0.2);
+    margin-top: 1.5rem;
+    position: relative;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+}
+
+.cyber-text::before,
+.cyber-text::after {
+    content: '';
+    height: 1px;
+    width: 40px;
+    background: linear-gradient(90deg, 
+        transparent,
+        rgba(0, 247, 255, 0.5),
+        transparent);
+}
+
+.scanline {
+    position: absolute;
+    width: 100%;
+    height: 100%;
+    background: linear-gradient(
+        to bottom,
+        rgba(0, 247, 255, 0.03) 50%,
+        rgba(0, 0, 0, 0.1) 50%
+    );
+    background-size: 100% 4px;
+    pointer-events: none;
+    animation: scan 4s linear infinite;
+    opacity: 0.5;
+}
+
+@keyframes scan {
+    0% { transform: translateY(-100%); }
+    100% { transform: translateY(100%); }
+}
+
+
+
+/* Shared Button Styles */
+.cyber-button {
+    position: relative;
+    background: rgba(0, 20, 30, 0.9);
+    border: 1px solid #00F7FF;
+    color: #00F7FF;
+    padding: 1.5rem 3rem;
+    font-size: 1.2rem;
+    cursor: pointer;
+    transition: all 0.3s ease;
+    font-family: 'Chakra Petch', sans-serif;
+    text-transform: uppercase;
+    letter-spacing: 2px;
+    overflow: hidden;
+}
+
+.cyber-button:hover {
+    background: rgba(0, 40, 50, 0.9);
+    box-shadow: 0 0 25px rgba(0, 247, 255, 0.4);
+    text-shadow: 0 0 15px rgba(0, 247, 255, 0.5);
+}
+
+/* Scanline Animation */
+.scanline {
+    position: absolute;
+    width: 100%;
+    height: 100%;
+    background: linear-gradient(
+        to bottom,
+        rgba(0, 247, 255, 0.05) 50%,
+        rgba(0, 0, 0, 0.1) 50%
+    );
+    background-size: 100% 4px;
+    pointer-events: none;
+    animation: scan 4s linear infinite;
+}
+
+@keyframes scan {
+    0% { transform: translateY(-100%); }
+    100% { transform: translateY(100%); }
+}

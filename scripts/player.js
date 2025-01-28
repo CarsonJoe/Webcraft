@@ -1,5 +1,5 @@
 import { CHUNK_HEIGHT, CHUNK_SIZE } from './constants.js';
-import { getBlock, updateBlock, chunks, addToLoadQueue, spawnPoint } from "./world.js";
+import { getBlock, updateBlock, chunks, addToLoadQueue } from "./world.js";
 import { chunkMeshes } from "./renderer.js";
 import { UIManager } from "./uiManager.js";
 
@@ -40,8 +40,6 @@ const Player = (function () {
     let lastTime = performance.now();
 
     function init(cam, scene) {
-        // Get canvas from UIManager instead of querying directly
-        const canvas = UIManager.getCanvas();
 
         camera = cam;
         pitchObject = new THREE.Object3D();
@@ -49,7 +47,6 @@ const Player = (function () {
         pitchObject.add(camera);
 
         yawObject = new THREE.Object3D();
-        yawObject.position.set(spawnPoint.x, CHUNK_HEIGHT, spawnPoint.z);
         yawObject.add(pitchObject);
         scene.add(yawObject);
 
@@ -359,6 +356,14 @@ const Player = (function () {
         return yawObject ? yawObject.position : null;
     }
 
+    function setPosition(x, y, z) {
+        if (!yawObject) return;
+        
+        yawObject.position.set(x, y, z);
+        velocity.set(0, 0, 0); // Reset velocity to prevent unintended movement
+        canJump = false; // Reset jump state
+    }
+
     function getObject() {
         return yawObject;
     }
@@ -392,6 +397,7 @@ const Player = (function () {
         init,
         update,
         getPosition,
+        setPosition,
         getObject,
         checkCollision,
         selectedBlockType

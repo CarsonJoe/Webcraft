@@ -823,27 +823,6 @@ export class Atmosphere {
         return new THREE.Color(r / 255, g / 255, b / 255);
     }
 
-
-    calculateKeplerEquation(meanAnomaly, eccentricity, tolerance = 1e-6) {
-        let E = meanAnomaly;
-        let delta = tolerance + 1;
-        while (delta > tolerance) {
-            const E1 = meanAnomaly + eccentricity * Math.sin(E);
-            delta = Math.abs(E1 - E);
-            E = E1;
-        }
-        return E;
-    }
-
-    calculateTrueAnomaly(eccentricAnomaly) {
-        const cosE = Math.cos(eccentricAnomaly);
-        const sinE = Math.sin(eccentricAnomaly);
-        return Math.atan2(
-            Math.sqrt(1 - this.eccentricity * this.eccentricity) * sinE,
-            cosE - this.eccentricity
-        );
-    }
-
     calculateSunPosition() {
         // Simplified orbital model (circular orbit)
         const daysPerYear = this.orbitalPeriod;

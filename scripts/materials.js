@@ -167,6 +167,8 @@ export const waterMaterial = new THREE.ShaderMaterial({
                 value: new THREE.Color(...MATERIAL_CONFIG[5].rgb)
             },
             lightDirection: { value: new THREE.Vector3(1, 1, 1).normalize() },
+            sunDirection: { value: new THREE.Vector3() },
+            sunColor: { value: new THREE.Color() },
             waveScale: { value: .2 },
             cameraPos: { value: new THREE.Vector3() },
             reflectionIntensity: { value: 0.2 }
@@ -333,6 +335,8 @@ export let leavesMaterial = new THREE.ShaderMaterial({
         THREE.UniformsLib.fog,
         {
             time: { value: 0 },
+            sunDirection: { value: new THREE.Vector3() },
+            sunColor: { value: new THREE.Color() },
             windStrength: { value: 0.5 },
             sunPosition: { value: new THREE.Vector3() },
             dayNightCycle: { value: 0.5 },

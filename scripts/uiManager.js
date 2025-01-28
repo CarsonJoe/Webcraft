@@ -3,6 +3,10 @@ import { setRenderDistance, currentRenderDistance } from './world.js';
 export const UIManager = (function () {
     let canvas = null;
     let escapeMenu;
+    let titleScreen;
+    let loadingScreen;
+    let loadingBar;
+    let loadingText;
     let isMenuOpen = true;
     let isIntentionalStateChange = false;
     let currentMenu = null;
@@ -11,13 +15,18 @@ export const UIManager = (function () {
     function init() {
         canvas = document.querySelector('canvas');
         escapeMenu = document.getElementById('escape-menu');
+        titleScreen = document.getElementById('title-screen');
+        loadingScreen = document.getElementById('loading-screen');
+        loadingBar = document.getElementById('loading-bar');
+        loadingText = document.getElementById('loading-text');
 
-        // Initialize current menu state
-        currentMenu = escapeMenu;  // Use the escape-menu element directly
-        currentMenu.style.display = 'block';
+        // Initial state
+        titleScreen.style.display = 'flex';
+        escapeMenu.style.display = 'none';
+        loadingScreen.style.display = 'none';
+        canvas.style.display = 'none'; // Hide canvas until loading completes
 
         setupEventListeners();
-        setupPointerLock();
     }
 
     function getCanvas() {
@@ -25,6 +34,14 @@ export const UIManager = (function () {
     }
 
     function setupEventListeners() {
+        
+        // Start game button
+        document.getElementById('start-btn').addEventListener('click', () => {
+            showLoadingScreen();
+            const event = new CustomEvent('startgame');
+            document.dispatchEvent(event);
+        });
+
         // Resume button
         document.getElementById('resume-btn').addEventListener('click', () => {
             toggleEscapeMenu(false);
@@ -61,6 +78,23 @@ export const UIManager = (function () {
             renderDistValue.textContent = value;
             setRenderDistance(parseInt(value));
         });
+    }
+
+    function showLoadingScreen() {
+        titleScreen.style.display = 'none';
+        loadingScreen.style.display = 'flex';
+        canvas.style.display = 'none';
+    }
+
+    function showGame() {
+        loadingScreen.style.display = 'none';
+        canvas.style.display = 'block';
+        setupPointerLock();
+    }
+
+    function updateLoadingProgress(progress, message) {
+        loadingBar.style.width = `${progress}%`;
+        loadingText.textContent = message;
     }
 
     function switchMenu(newMenu) {
@@ -150,6 +184,8 @@ export const UIManager = (function () {
         init,
         toggleEscapeMenu,
         isInputEnabled,
-        getCanvas
+        getCanvas,
+        updateLoadingProgress,
+        showGame
     };
 })();
