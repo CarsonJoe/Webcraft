@@ -16,10 +16,6 @@ export let spawnPoint = null;
 export const collisionGeometry = new Map();
 export let currentRenderDistance = RENDER_DISTANCE;
 
-
-let lastUpdateTime = 0;
-const UPDATE_COOLDOWN = 100; // ms
-
 // Chunk storage and queues
 const chunks = {};
 const chunkStates = {};
@@ -29,13 +25,6 @@ const chunkLoadQueue = [];      // Use as a priority queue (heap)
 
 let currentPlayerChunkX = 0;
 let currentPlayerChunkZ = 0;
-
-// Performance management
-const MAX_CHUNKS_PER_FRAME = 50;
-let frameBudget = 16; // Start with 16ms (~60fps)
-let lastFrameTime = performance.now();
-
-
 
 // Initialize world systems
 export function initWorld() {
@@ -58,7 +47,7 @@ export function initWorld() {
     spawnPoint = findSuitableSpawnPoint(0, 0);
     console.log("Generated spawn point:", spawnPoint);
 
-    const workerCount = navigator.hardwareConcurrency || 4;
+    const workerCount = 2;
     geometryWorkers = [];
 
     for (let i = 0; i < workerCount; i++) {
@@ -373,23 +362,8 @@ function addToLoadQueue(x, z) {
 function processChunkQueue() {
     if (!workerInitialized || !sceneReady) return;
 
-    const now = performance.now();
-    const timeSinceLastFrame = now - lastFrameTime;
-    lastFrameTime = now;
-
-    if (timeSinceLastFrame < 16) {
-        frameBudget += 16 - timeSinceLastFrame;
-    } else {
-        frameBudget -= timeSinceLastFrame - 16;
-    }
-
-    frameBudget = Math.max(8, Math.min(32, frameBudget));
-
-    const startTime = performance.now();
-    let processed = 0;
-
     // Process load queue first
-    while (chunkLoadQueue.length > 0 && processed < MAX_CHUNKS_PER_FRAME) {
+    while (chunkLoadQueue.length > 0) {
         const { x, z } = chunkLoadQueue.shift();
         queuedChunks.delete(`${x},${z}`);
         const chunkKey = `${x},${z}`;
@@ -397,10 +371,8 @@ function processChunkQueue() {
         if (!chunks[chunkKey] && chunkStates[chunkKey] !== CHUNK_LOADING) {
             chunkStates[chunkKey] = CHUNK_LOADING;
             chunkWorker.postMessage({ chunkX: x, chunkZ: z });
-            processed++;
         }
 
-        if (performance.now() - startTime > frameBudget) break;
     }
 
     // Process remesh queue
@@ -511,8 +483,6 @@ function setBlock(x, y, z, type) {
 }
 
 function updateBlock(x, y, z, newBlockType) {
-    if (performance.now() - lastUpdateTime < UPDATE_COOLDOWN) return;
-    lastUpdateTime = performance.now();
     const chunkX = Math.floor(x / CHUNK_SIZE);
     const chunkZ = Math.floor(z / CHUNK_SIZE);
     const localX = ((x % CHUNK_SIZE) + CHUNK_SIZE) % CHUNK_SIZE;
