@@ -1,5 +1,8 @@
 
-import { DAY_LENGTH } from './constants.js';
+import { DAY_LENGTH } from '../constants.js';
+import { CloudManager } from './clouds.js';
+import { FogManager } from './fog.js';
+
 
 export class Atmosphere {
     static PLANETARY_CONFIGS = {
@@ -281,6 +284,13 @@ export class Atmosphere {
         this.renderer = renderer;
         this.config = config;
 
+        
+        this.materials = {
+            clouds: null,
+            water: null,
+            leaves: null
+        };
+
         // Orbital parameters
         this.axialTilt = config.axialTilt * Math.PI / 180;
         this.orbitalPeriod = config.orbitalPeriod;
@@ -306,10 +316,22 @@ export class Atmosphere {
 
         // Initialize components
         this.initLights();
-        this.initFog();
         this.initSky();
         this.initSunVisual();
         this.initStarfield();
+
+        // Initialize cloud system
+        this.cloudManager = new CloudManager(scene, {
+            cloudHeight: config.cloudHeight || 180,
+            cloudCover: config.cloudCover || 0.9,
+            cloudDensity: config.cloudDensity || 0.9,
+            cloudSpeed: config.cloudSpeed || 0.0005
+        });
+
+        this.fogManager = new FogManager(scene, config);
+
+
+        this.materials.clouds = this.cloudManager.getMaterial();
 
         // Material references
         this.materials = {
@@ -778,71 +800,6 @@ export class Atmosphere {
         this.scene.add(this.starfield);
     }
 
-    initFog() {
-        this.scene.fog = new THREE.Fog(
-            this.config.fogColor.day,
-            20,
-            500
-        );
-    }
-
-    updateFog() {
-        if (!this.scene.fog) return;
-
-        // Get sun altitude for color transitions
-        const sunPos = this.calculateSunPosition();
-        const sunAltitude = sunPos.y / this.orbitRadius;
-
-        // Calculate fog distances based on time of day
-        const fogNear = 20 + (1 - this.dayNightValue) * 10;
-        const fogFar = 300 + this.dayNightValue * 200;
-
-        // Get HSL values from the preset night fog color
-        const hsl = {};
-        this.config.fogColor.night.getHSL(hsl);
-        
-        // Create night fog color with minimum brightness but keeping the hue and saturation
-        const nightFogColor = new THREE.Color().setHSL(
-            hsl.h,
-            hsl.s,
-            Math.max(hsl.l, 0.05)  // Ensure minimum brightness of 5%
-        );
-
-        // Calculate fog color based on sun position
-        const fogColor = new THREE.Color();
-        if (sunAltitude < -0.4) { 
-            // Full night - use night fog color with enforced minimum brightness
-            fogColor.copy(nightFogColor);
-        } else if (sunAltitude < 0) { 
-            // Night to sunset transition
-            const t = (sunAltitude + 0.4) / 0.4;
-            const sunsetColor = this.config.atmosphereColor.sunset.clone().multiplyScalar(0.8);
-            fogColor.lerpColors(nightFogColor, sunsetColor, t);
-        } else if (sunAltitude < 0.3) { 
-            // Sunset to day transition
-            const t = sunAltitude / 0.3;
-            const sunsetColor = this.config.atmosphereColor.sunset.clone().multiplyScalar(0.8);
-            fogColor.lerpColors(sunsetColor, this.config.fogColor.day, t);
-        } else { 
-            // Full day
-            fogColor.copy(this.config.fogColor.day);
-        }
-
-        // Apply fog color
-        this.scene.fog.color.copy(fogColor);
-
-        // Handle dust storms if enabled
-        if (this.config.dustStorms && this.dustStormIntensity > 0) {
-            const dustColor = new THREE.Color(0.8, 0.6, 0.3);
-            this.scene.fog.color.lerp(dustColor, this.dustStormIntensity * 0.5);
-            this.scene.fog.near = fogNear + this.dustStormIntensity * 20;
-            this.scene.fog.far = Math.max(100, fogFar - this.dustStormIntensity * 200);
-        } else {
-            this.scene.fog.near = fogNear;
-            this.scene.fog.far = fogFar;
-        }
-    }
-
     registerMaterials(materials) {
         this.materials = { ...this.materials, ...materials };
     }
@@ -939,6 +896,11 @@ export class Atmosphere {
         // Calculate sun position with latitude consideration
         const sunPos = this.calculateSunPosition();
         const sunDirection = sunPos.clone().normalize();
+
+        // Calculate day/night blend based on sun altitude
+        const sunAltitude = sunPos.y / this.orbitRadius;
+        this.dayNightValue = THREE.MathUtils.clamp(sunAltitude * 0.5 + 0.5, 0, 1);
+        this.skyMaterial.uniforms.dayNightCycle.value = this.dayNightValue;
     
         // Update celestial objects positions
         this.sun.position.copy(sunPos);
@@ -948,10 +910,6 @@ export class Atmosphere {
         if (this.skyMaterial) {
             this.skyMaterial.uniforms.sunPosition.value.copy(sunDirection);
     
-            // Calculate day/night blend based on sun altitude
-            const sunAltitude = sunPos.y / this.orbitRadius;
-            this.dayNightValue = THREE.MathUtils.clamp(sunAltitude * 0.5 + 0.5, 0, 1);
-            this.skyMaterial.uniforms.dayNightCycle.value = this.dayNightValue;
     
             // Calculate sky colors for current time
             const skyColor = new THREE.Color();
@@ -1017,7 +975,13 @@ export class Atmosphere {
         this.sun.intensity = sunDirection.y > 0 ? sunDirection.y * 0.8 : 0;
     
         // Update fog and atmospheric effects
-        this.updateFog();
+        this.fogManager.update(
+            sunAltitude,
+            this.dayNightValue,
+            this.dustStormIntensity,
+            deltaTime
+        );
+
         this.updateSpecialEffects(deltaTime);
     
         // Update registered materials
@@ -1075,5 +1039,17 @@ export class Atmosphere {
     
         // Update sky position to follow camera
         this.sky.position.copy(playerPos);
+
+        // Update cloud system
+        this.cloudManager.update(deltaTime, this.dayNightValue, sunDirection, playerPos);
+
+    }
+
+    dispose() {
+        // ... existing disposal code if any ...
+        
+        if (this.cloudManger) {
+            this.cloudManager.dispose();
+        }
     }
 }

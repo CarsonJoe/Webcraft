@@ -1,5 +1,3 @@
-import { RENDER_DISTANCE } from "./constants.js";
-
 let renderer, camera;
 export let scene = new THREE.Scene(); 
 export const chunkMeshes = {};
@@ -23,8 +21,6 @@ export function initRenderer(scn, cam) {
     renderer.setSize(window.innerWidth, window.innerHeight);
     document.body.appendChild(renderer.domElement);
     
-    scene.fog = new THREE.Fog(0x619dde, (RENDER_DISTANCE / 24 * 100), (RENDER_DISTANCE / 4 * 100));  // Sky blue color, start fading at 20 units, fully faded at 500 units
-
     createFPSCounter();
 
     return renderer;
@@ -77,27 +73,6 @@ export function removeChunkGeometry(chunkX, chunkZ) {
     delete chunkMeshes[chunkKey];
 }
 
-export function createSkybox(scene, renderer) {
-    const loader = new THREE.TextureLoader();
-    loader.load(
-        'assets/sky.png',
-        (texture) => {
-            const rt = new THREE.WebGLCubeRenderTarget(texture.image.height);
-            rt.fromEquirectangularTexture(renderer, texture);
-            scene.background = rt.texture;
-            
-            // Set the fog color to match the sky color
-            const skyColor = new THREE.Color().setHSL(0.6, 1, 0.9);  // Adjust these values to match sky texture
-            scene.fog.color.copy(skyColor);
-        },
-        undefined,
-        (error) => {
-            console.error('An error occurred while loading the sky texture:', error);
-        }
-    );
-}
-
-
 const frustum = new THREE.Frustum();
 const projScreenMatrix = new THREE.Matrix4();
 
@@ -135,21 +110,4 @@ export function render(scene, camera) {
 
     renderer.render(scene, camera);
     updateFPSCounter();
-}
-
-export function updateFog(dayNightValue) {
-    if (!scene.fog) return;
-
-    // Color interpolation between day and night
-    const dayColor = new THREE.Color().setHSL(0.6, 0.5, 0.7); // Light sky blue
-    const nightColor = new THREE.Color().setHSL(0.62, 0.3, 0.05); // Dark navy blue
-
-    // Fog density parameters
-    const fogNear = 20 + (1 - dayNightValue) * 10; // 20-30 units
-    const fogFar = 300 + dayNightValue * 200; // 300-500 units
-
-    // Apply interpolated values
-    scene.fog.color.lerpColors(nightColor, dayColor, dayNightValue);
-    scene.fog.near = fogNear;
-    scene.fog.far = fogFar;
 }
