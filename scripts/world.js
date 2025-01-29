@@ -8,7 +8,7 @@ const CHUNK_LOADING = 1;
 const CHUNK_LOADED = 2;
 export const CHUNK_MESHED = 3;
 let chunkWorker = null;
-const workerCount = 2; // *** keeps up with max RD and diagonal flying at current player speeds, init generation is slow ***
+const workerCount = 5; // *** 2 keeps up with max RD and diagonal flying at current player speeds, init generation is slow ***
 export let geometryWorkers = [];
 let currentGeometryWorkerIndex = 0;
 let initializationComplete = false;
@@ -221,7 +221,6 @@ function createChunkMeshes(chunkX, chunkZ, solidData, waterData, leavesData) {
         if (leaves) {
             scene.remove(leaves);
             if (leaves.geometry) leaves.geometry.dispose();
-            leavesMesh.frustumCulled = true;
         }
     }
 
@@ -280,7 +279,7 @@ function createChunkMeshes(chunkX, chunkZ, solidData, waterData, leavesData) {
         );
 
         leavesMesh = new THREE.Mesh(leavesGeometry, leavesMaterial);
-        leavesMesh.frustumCulled = false;
+        leavesMesh.frustumCulled = true;
         leavesMesh.renderOrder = 1;
     }
 

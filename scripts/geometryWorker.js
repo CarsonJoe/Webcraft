@@ -2,6 +2,7 @@ import { CHUNK_SIZE, CHUNK_HEIGHT } from './constants.js';
 
 let materials = {};
 let seed = 0;
+let colorPRNG = null;
 
 function fastVariation(x, y, z) {
     // Use more iterations of bit mixing to get better distribution
