@@ -221,6 +221,7 @@ function createChunkMeshes(chunkX, chunkZ, solidData, waterData, leavesData) {
         if (leaves) {
             scene.remove(leaves);
             if (leaves.geometry) leaves.geometry.dispose();
+            leavesMesh.frustumCulled = true;
         }
     }
 

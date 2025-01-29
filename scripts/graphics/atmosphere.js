@@ -352,8 +352,8 @@ export class Atmosphere {
         // Sun
         this.sun = new THREE.DirectionalLight(this.config.sunColor, 0.2);
         this.sun.position.set(100, 100, 100);
-        this.sun.castShadow = true;
-        this.configureShadows(this.sun);
+        // this.sun.castShadow = true;
+        // this.configureShadows(this.sun);
         this.scene.add(this.sun);
 
         // Light target
