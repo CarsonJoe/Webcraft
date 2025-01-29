@@ -19,6 +19,7 @@ export const UIManager = (function () {
         loadingScreen = document.getElementById('loading-screen');
         loadingBar = document.getElementById('loading-bar');
         loadingText = document.getElementById('loading-text');
+        currentMenu = document.querySelector('.menu-main');
 
         // Initial state
         titleScreen.style.display = 'flex';
@@ -141,6 +142,9 @@ export const UIManager = (function () {
         isIntentionalStateChange = true;
 
         if (isMenuOpen) {
+            if (!currentMenu) {
+                currentMenu = document.querySelector('.menu-main');
+            }
             // Opening animation
             escapeMenu.classList.remove('exit');
             escapeMenu.classList.add('active');

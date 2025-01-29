@@ -69,8 +69,8 @@ export class CloudManager {
                 cloudTexture: { value: this.cloudTexture },
                 lightDirection: { value: new THREE.Vector3() },
                 cloudSpeed: { value: 0.005 },
-                cloudCover: { value: 0.5 },
-                densityScale: { value: 0.9 },
+                cloudCover: { value: 0.6 },
+                densityScale: { value: 0.8 },
                 lightIntensity: { value: 0.9 },
                 cloudPosition: { value: new THREE.Vector3() },
                 playerMovement: { value: new THREE.Vector2() }  // New uniform for tracking player movement

@@ -17,7 +17,7 @@ export class Atmosphere {
             atmosphereColor: {
                 day: new THREE.Color(0x87CEEB),
                 sunset: new THREE.Color(0xFF7F50),  // Coral color for sunset
-                night: new THREE.Color(0x07090d)
+                night: new THREE.Color(0x10151f)
             },
             sunsetThreshold: 0.2,
             sunColor: new THREE.Color(0xFFFF99),
@@ -906,7 +906,7 @@ export class Atmosphere {
     
             // Starlight settings
             const starlightColor = new THREE.Color(0.45, 0.45, 0.35);
-            const starlightIntensity = 0.18;
+            const starlightIntensity = 0.14;
             const maxAmbientIntensity = 0.4;
     
             // Convert colors to HSL with safety checks
