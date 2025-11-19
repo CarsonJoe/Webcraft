@@ -1,0 +1,11 @@
+{
+  "name": "webcraft",
+  "version": "1.0.0",
+  "description": "Voxel game prototype",
+  "scripts": {
+    "start": "npx -y serve ."
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC"
+}
